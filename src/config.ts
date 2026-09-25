@@ -1,0 +1,130 @@
+/**
+ * Configuration for the compaction policy.
+ *
+ * Pure: no file I/O here, so the resolution logic is unit-testable and the
+ * loader can stay thin. Precedence, highest first: CLI flag, project config,
+ * user config, built-in default.
+ */
+
+import { DEFAULT_TOOL_POLICY, type ToolClass, type ToolPolicy } from "./policy.ts";
+
+/** How the kept window is chosen. */
+export type RecentMode =
+	/** Token target, extended back to the enclosing turn start. Whole turns only. */
+	| "tokens-snapped"
+	/** Pi's stock token target, which may split the turn containing the boundary. */
+	| "tokens"
+	/** Strict paper Algorithm 1: keep the last K turns, no budget check. */
+	| "turns";
+
+export type ThinkingMode = "keep" | "drop";
+
+export interface CliffConfig {
+	// --- trigger -------------------------------------------------------------
+	/** B: the peak context at which compaction fires. Written to Pi as
+	 *  `reserveTokens = max(reserveFloor, contextWindow - thresholdTokens)`. */
+	thresholdTokens: number;
+	/** Headroom kept for the response. A normal-turn allowance, not the model's
+	 *  maximum output: that is a capability ceiling, not a per-turn requirement. */
+	reserveFloor: number;
+
+	// --- kept window ---------------------------------------------------------
+	keepRecentTokens: number;
+	recentMode: RecentMode;
+	/** With `tokens-snapped`, the extra tokens we accept to keep a whole turn
+	 *  before falling back to Pi's split cut. */
+	maxTurnOvershoot: number;
+	/** `recentMode: "turns"` only. */
+	keepRecentTurns: number;
+
+	// --- compacted-region policy --------------------------------------------
+	/** Tool results longer than this are dropped or excerpted. */
+	resultMaxChars: number;
+	/** Tool-call signature (serialized arguments) cap. */
+	cmdMaxChars: number;
+	thinkingMode: ThinkingMode;
+	/** Per assistant message. 0 = unlimited. */
+	thinkingMaxChars: number;
+	/** Per assistant message, visible text only. 0 = unlimited. */
+	thoughtMaxChars: number;
+	/** Per user message. 0 = unlimited. */
+	humanMaxChars: number;
+	excerptHead: number;
+	excerptTail: number;
+	toolPolicy: ToolPolicy;
+
+	// --- behaviour -----------------------------------------------------------
+	/** `/compact <instructions>` falls through to Pi's LLM summarizer: the
+	 *  instructions focus the summary, and mechanical truncation cannot honour them. */
+	honorManualInstructions: boolean;
+	/** Compute and report, but never modify a request. */
+	shadow: boolean;
+}
+
+export const DEFAULT_CONFIG: CliffConfig = {
+	thresholdTokens: 250_000,
+	reserveFloor: 16_384,
+	keepRecentTokens: 40_000,
+	recentMode: "tokens-snapped",
+	maxTurnOvershoot: 20_000,
+	keepRecentTurns: 3,
+
+	resultMaxChars: 500,
+	cmdMaxChars: 150,
+	thinkingMode: "keep",
+	thinkingMaxChars: 2000,
+	thoughtMaxChars: 0,
+	humanMaxChars: 20_000,
+	excerptHead: 300,
+	excerptTail: 200,
+	toolPolicy: DEFAULT_TOOL_POLICY,
+
+	honorManualInstructions: true,
+	shadow: true,
+};
+
+/** A partial config in which the one nested object is also partial. */
+export type CliffConfigInput = Partial<Omit<CliffConfig, "toolPolicy">> & {
+	toolPolicy?: Partial<ToolPolicy>;
+};
+
+function mergeToolPolicy(base: ToolPolicy, over?: Partial<ToolPolicy>): ToolPolicy {
+	if (!over) return base;
+	return {
+		dropTools: over.dropTools ?? base.dropTools,
+		excerptTools: over.excerptTools ?? base.excerptTools,
+		unknown: (over.unknown as ToolClass | undefined) ?? base.unknown,
+		alwaysKeepErrors: over.alwaysKeepErrors ?? base.alwaysKeepErrors,
+	};
+}
+
+/** Deep-ish merge; later inputs win. Only `toolPolicy` is nested. */
+export function resolveConfig(...inputs: readonly (CliffConfigInput | undefined)[]): CliffConfig {
+	let out: CliffConfig = { ...DEFAULT_CONFIG, toolPolicy: { ...DEFAULT_TOOL_POLICY } };
+	for (const input of inputs) {
+		if (!input) continue;
+		const { toolPolicy, ...rest } = input;
+		out = { ...out, ...(rest as Partial<CliffConfig>) };
+		out.toolPolicy = mergeToolPolicy(out.toolPolicy, toolPolicy);
+	}
+	return out;
+}
+
+/**
+ * Pi's trigger and ours are the same number seen from opposite ends:
+ *
+ *   Pi fires when  contextTokens > contextWindow - reserveTokens
+ *   we want it at  contextTokens > thresholdTokens
+ *   =>             reserveTokens = contextWindow - thresholdTokens
+ *
+ * Clamped so that a threshold at or beyond the window degrades to the floor
+ * instead of producing a zero (or negative) reserve.
+ */
+export function reserveTokensFor(cfg: CliffConfig, contextWindow: number): number {
+	return Math.max(cfg.reserveFloor, contextWindow - cfg.thresholdTokens);
+}
+
+/** The inverse: the threshold Pi is actually operating at. */
+export function effectiveThreshold(contextWindow: number, reserveTokens: number): number {
+	return contextWindow - reserveTokens;
+}
