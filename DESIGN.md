@@ -305,7 +305,14 @@ Two discrepancies worth remembering:
   says yes, via `sourceEntries`).
 - One smoke test that a large `reserveTokens` does not distort the fallback
   summariser's output cap.
-- Decide whether writing `settings.json` for the threshold is acceptable. There
-  is no supported API: `SettingsManager`'s public surface has no compaction
-  setter and `/settings` does not expose `compaction.*`. A plain atomic
-  read-modify-write followed by `ctx.reload()` works, but it is unofficial.
+- Golden-fixture test against a real compacted region extracted from a session,
+  rather than hand-shaped fixtures.
+
+Resolved: the threshold write-back. The menu applies it automatically — an
+atomic read-modify-write of `settings.json` followed by `ctx.reload()`, which is
+what makes Pi re-read settings from disk. There is no supported alternative:
+`SettingsManager`'s public surface has no compaction setter and `/settings` does
+not expose `compaction.*`. Two properties are tested rather than assumed — an
+unparseable file stops the write instead of being clobbered, and every key we do
+not own survives — and the panel reports the effective threshold read back from
+the file, so a hand edit cannot silently disagree with what is displayed.

@@ -19,16 +19,50 @@ the measurements behind the defaults.
 
 ## Status
 
-Early. The policy core and its tests are in place; the Pi adapter, the
-configuration menu, and the threshold write-back are next. See DESIGN.md §10–11.
+Working end to end, **shadow mode on by default**: it computes and reports every
+compaction but modifies nothing until you turn it off. The threshold write-back
+is applied from `/cliffcompaction`, not silently.
+
+Not built: `context_edit` eviction (deliberately — see DESIGN.md §3), and branch
+summarisation via `/tree`, which uses a separate Pi hook and stays LLM-based.
+
+## Install
+
+```bash
+npm install
+```
+
+Then either load it for one session:
+
+```bash
+pi --extension /path/to/pi-cliffcompaction/src/index.ts
+```
+
+or add the directory to `extensions` in `~/.pi/agent/settings.json`.
+
+## Use
+
+```
+/cliffcompaction            interactive panel
+/cliffcompaction status     one-shot report
+/cliffcompaction apply      write the threshold into Pi's settings and reload
+```
+
+The panel shows whether the threshold is actually in effect — an unapplied
+threshold means Pi fires at `window − 16384`, which for most sessions means it
+never fires at all.
 
 ## Layout
 
 ```
-src/types.ts       structural mirror of the AgentMessage subset we touch
-src/policy.ts      tool-aware retention classes (drop / excerpt / keep)
-src/serialize.ts   the algorithm: compacted region -> mechanical digest
-src/config.ts      defaults, merge, and threshold <-> reserveTokens arithmetic
+src/types.ts         structural mirror of the AgentMessage subset we touch
+src/policy.ts        tool-aware retention classes (drop / excerpt / keep)
+src/serialize.ts     the algorithm: compacted region -> mechanical digest
+src/config.ts        defaults, merge, and threshold <-> reserveTokens arithmetic
+src/compact.ts       cut planning: turn snapping, overshoot guard, file carry
+src/settings.ts      reading Pi's settings.json, and applying the threshold
+src/config-file.ts   our own knobs, and the precedence between their homes
+src/index.ts         the extension: hooks, command, panel
 ```
 
 ## Development

@@ -131,6 +131,12 @@ export function resolveKeepRecentTokens(
 	return override ?? c?.keepRecentTokens ?? builtin;
 }
 
+/** Human label for the threshold Pi is actually operating at, e.g. `250k`. */
+export function effectiveThresholdLabel(contextWindow: number, reserveTokens: number): string {
+	const b = Math.max(0, contextWindow - reserveTokens);
+	return `${Math.round(b / 1000)}k`;
+}
+
 /** Whether compaction is on at all. `undefined` means Pi's default, which is on. */
 export function compactionEnabled(settings: PiSettings): boolean {
 	return settings.compaction?.enabled !== false;
