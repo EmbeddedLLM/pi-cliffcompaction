@@ -258,7 +258,7 @@ function serializeBashExecution(m: AnyMsg, cfg: CliffConfig, stats: Serializatio
  */
 export function serializeMessage(m: AnyMsg, cfg: CliffConfig, stats: SerializationStats): string[] {
 	stats.messages++;
-	stats.originalChars += rawChars(m);
+	stats.originalChars += messageChars(m);
 	let out: string[];
 	switch (m.role) {
 		case "assistant":
@@ -307,7 +307,9 @@ function plainText(content: Content | undefined): string {
 	return parts.join("\n");
 }
 
-function rawChars(m: AnyMsg): number {
+/** Serialized-size proxy for one message, in characters. Used for the
+ *  overshoot guard and for reporting; never for the trigger, which Pi owns. */
+export function messageChars(m: AnyMsg): number {
 	const c = (m as { content?: Content }).content;
 	if (typeof c === "string") return c.length;
 	let n = 0;
