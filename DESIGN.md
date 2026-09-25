@@ -110,11 +110,6 @@ Be explicit about what is and is not a deviation from the paper.
 
 ### Genuine deviations
 
-- **`recentMode: "tokens-snapped"` is the default** (see §5). The paper cuts on
-  turn boundaries (`turns[:-2K]`, "K turn pairs"); Pi's stock cut is
-  token-denominated and may split a turn. Snapping restores the paper's precision
-  property with a bounded emergency split. `recentMode: "turns"` reproduces
-  Algorithm 1 exactly.
 - **`thresholdTokens` defaults to 250k, not the paper's 8k–45k.** Explicitly the
   operator's choice: a bounded but generous context.
 - **`context_edit` eviction is not implemented.** This is the one idea that
@@ -122,6 +117,9 @@ Be explicit about what is and is not a deviation from the paper.
   throughout a trajectory, CliffCompaction leaves it unchanged and lets it grow
   naturally, compacting only upon exhausting a preset budget"). At a 250k
   threshold it would fire almost never. Reserved as a config key; not built.
+
+Not a deviation after all: keeping Pi's cut unchanged. See §5 — the snap was an
+attempt to fix a problem that does not exist, and it broke the normal case.
 
 ## 4. Content policy
 
@@ -154,28 +152,38 @@ mechanical content would misrepresent it to the model.
 ## 5. The kept window
 
 `keepRecentTokens` is Pi's knob and we keep Pi's unit, because Pi's is
-token-denominated and cannot overflow the budget by construction.
+token-denominated and cannot overflow the budget by construction. There is no
+`recentMode` and no turn count: **Pi's cut is already at cliff's granularity.**
+`findProjectedCutPoint` cuts at user/assistant/bashExecution/custom messages and
+never at a tool result, so an assistant message and its observations always stay
+together — exactly the paper's "K turn pairs".
 
-The problem it creates: `isTurnStartMessage` excludes `assistant` while
-`isCutPointMessage` includes it, and assistant messages outnumber user messages
-roughly 8:1. So `cutPoints.find(c => c >= i)` usually lands on an assistant
-message and `isSplitTurn` fires on **most** compactions, LLM-summarising the
-early part of the current turn while keeping the rest verbatim.
+`isSplitTurn` is a different thing. It is true when the cut lands inside a
+*user-message span*, meaning the early part of the current task belongs in the
+summary while the recent steps stay verbatim. That is not a structural defect and
+needs no correction: both `messagesToSummarize` and `turnPrefixMessages` go into
+the digest, in order.
 
-`tokens-snapped` fixes this cheaply. Because `messagesToSummarize` is
-`slice(boundaryStart, historyEnd)` with `historyEnd = turnStartIndex` when split,
-Pi has *already* excluded the turn prefix from it. So:
+**This was wrong in an earlier revision, and a live session is what showed it.**
+The first version snapped the cut back to the enclosing turn start, on the theory
+that a turn straddling the summary/verbatim boundary was a precision loss. In an
+agent run the user-message span *is* the whole task, so its turn start is the
+first message of the session and snapping kept everything — leaving
+`messagesToSummarize` empty, the digest header-only, and the compaction a no-op
+that fell back to Pi's LLM summary. Observed directly:
 
 ```
-cut     = enclosing turn start of preparation.firstKeptEntryId   // itself when not split
-summary = serialize(preparation.messagesToSummarize)
-// preparation.turnPrefixMessages is intentionally not summarised: kept verbatim
+compaction 1  fromHook=False  llm_call=True   tokensBefore=8881  details=[readFiles, modifiedFiles]
 ```
 
-The only cost is overshoot, bounded by the prefix length and guarded by
-`maxTurnOvershoot` using Pi's own `estimateTokens`. Unbounded overshoot could
-push post-compaction context back over the trigger and thrash; at a 250k
-threshold the headroom makes that essentially unreachable.
+Removing the snap made both compactions ours, with no LLM call:
+
+```
+compaction 1  fromHook=True  llm_call=False  split=True   dropped 0        kept 1 msg
+compaction 2  fromHook=True  llm_call=False  split=False  dropped 21016ch  kept 1, dropped 2
+```
+
+`split` is still recorded in `details.cliffcompaction` for observability.
 
 ## 6. Why 2000 for thinking
 
@@ -269,7 +277,7 @@ The three disagree, which is why these are documented rather than inherited.
 | tool call | `Signature(·, 150)` | 150 | summarised | 150 |
 | tool result ≤ 500 | kept | kept | summarised | kept |
 | tool result > 500 | dropped | dropped | summarised | dropped (re-runnable) / excerpted (side-effecting) |
-| recent window | last `2K` messages | `keep_recent = 3` turns | 20k tokens | 40k tokens, snapped |
+| recent window | last `2K` messages | `keep_recent = 3` turns | 20k tokens | 40k tokens (Pi's cut) |
 | threshold | 8k–45k | 100k–200k (README) | window − 16384 | 250k |
 | drop thinking | — | `CLIFF_KEEP_THINKING=0` | — | `thinkingMode: drop` |
 | mid-trajectory eviction | **explicitly rejected** | — | — | not built |
@@ -295,18 +303,22 @@ Two discrepancies worth remembering:
   It stays LLM-based: it is a one-off on branch navigation, not part of the
   trajectory.
 - **Shadow mode is on by default.** The extension computes and reports, and
-  forwards nothing modified, until it is trusted.
+  modifies nothing until it is trusted. Verified end to end: a shadow run
+  produced one compaction with `fromHook: false` and a summarisation `usage`,
+  i.e. Pi's own LLM summary.
 
 ## 11. Open items
 
-- Verify on a live session that `messagesToSummarize` never contains a previous
-  summary (source says it cannot).
-- Verify that `fileOps` still populates when tool results are stubbed (source
-  says yes, via `sourceEntries`).
+- ~~Verify that `messagesToSummarize` never contains a previous summary~~ —
+  confirmed on live sessions: every compaction we produced carried
+  `fromHook: true` with no `usage`, and re-compaction produced a fresh digest
+  rather than a merge.
 - One smoke test that a large `reserveTokens` does not distort the fallback
   summariser's output cap.
 - Golden-fixture test against a real compacted region extracted from a session,
   rather than hand-shaped fixtures.
+- Verify `fileOps` still populates when tool results are stubbed via
+  `context_edit`, if eviction is ever built (source says yes, via `sourceEntries`).
 
 Resolved: the threshold write-back. The menu applies it automatically — an
 atomic read-modify-write of `settings.json` followed by `ctx.reload()`, which is

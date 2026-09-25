@@ -15,17 +15,13 @@ import {
 	type ExtensionAPI,
 	type ExtensionCommandContext,
 	type ExtensionContext,
-	estimateTokens,
 	getAgentDir,
 } from "@earendil-works/pi-coding-agent";
-
 import {
-	type CutCandidate,
 	type Preparation,
 	planCompaction,
 	shouldDeferToPi,
 } from "./compact.ts";
-import type { AnyMsg } from "./types.ts";
 import type { CliffConfig, CliffConfigInput } from "./config.ts";
 import { type ConfigPaths, configFilePaths, loadConfig, saveUserConfig } from "./config-file.ts";
 import { SUMMARY_HEADER } from "./serialize.ts";
@@ -44,7 +40,6 @@ interface SessionEntryLike {
 	readonly type?: string;
 	readonly id?: string;
 	readonly details?: unknown;
-	readonly message?: { readonly role?: string };
 }
 
 interface LastRun {
@@ -53,7 +48,7 @@ interface LastRun {
 	readonly originalChars: number;
 	readonly droppedChars: number;
 	readonly excerptedChars: number;
-	readonly snap: string;
+	readonly split: boolean;
 	readonly shadow: boolean;
 }
 
@@ -67,20 +62,6 @@ interface State {
 }
 
 let state: State | null = null;
-
-/** `isTurnStartMessage` in Pi: these roles start a turn; `assistant` does not. */
-const TURN_START_ROLES = new Set(["user", "bashExecution", "custom", "branchSummary", "compactionSummary"]);
-
-function cutCandidatesFrom(entries: readonly SessionEntryLike[]): CutCandidate[] {
-	return entries.map((e) => ({
-		id: typeof e.id === "string" ? e.id : "",
-		startsTurn:
-			e.type === "branch_summary" ||
-			e.type === "custom_message" ||
-			(e.type === "message" && TURN_START_ROLES.has(e.message?.role ?? "")),
-		isCompactionBoundary: e.type === "compaction",
-	}));
-}
 
 /** `details` of the most recent compaction on the path, for file-list carry. */
 function lastCompactionDetails(entries: readonly SessionEntryLike[]): unknown {
@@ -121,14 +102,14 @@ function statusText(ctx: ExtensionContext): string {
 	}
 
 	lines.push(
-		`policy  results>${s.cfg.resultMaxChars} dropped/excerpted · thinking≤${s.cfg.thinkingMaxChars || "∞"} · text≤${s.cfg.thoughtMaxChars || "∞"} · window ${s.cfg.recentMode}`,
+		`policy  results>${s.cfg.resultMaxChars} dropped/excerpted · thinking≤${s.cfg.thinkingMaxChars || "∞"} · text≤${s.cfg.thoughtMaxChars || "∞"}`,
 		`sources ${s.sources.length > 0 ? s.sources.join(", ") : "defaults only"}`,
 		`handled ${s.compactions} compaction(s) this session`,
 	);
 	if (s.last) {
 		const pct = s.last.originalChars > 0 ? Math.round(((s.last.droppedChars + s.last.excerptedChars) / s.last.originalChars) * 100) : 0;
 		lines.push(
-			`last    ${s.last.reason} · ${s.last.snap} · dropped ${s.last.droppedChars} + excerpted ${s.last.excerptedChars} chars (~${pct}% of the region)${s.last.shadow ? " [shadow]" : ""}`,
+			`last    ${s.last.reason} · ${s.last.split ? "split task" : "whole task"} · dropped ${s.last.droppedChars} + excerpted ${s.last.excerptedChars} chars (~${pct}% of the region)${s.last.shadow ? " [shadow]" : ""}`,
 		);
 	}
 	for (const w of s.warnings) lines.push(`warning ${w}`);
@@ -313,10 +294,8 @@ export default function cliffcompaction(pi: ExtensionAPI): void {
 			const entries = (event.branchEntries ?? []) as readonly SessionEntryLike[];
 			const plan = planCompaction({
 				prep,
-				cutCandidates: cutCandidatesFrom(entries),
 				cfg: s.cfg,
 				prevDetails: lastCompactionDetails(entries),
-				estimate: estimateTokens as unknown as (m: AnyMsg) => number,
 			});
 
 			s.compactions++;
@@ -326,7 +305,7 @@ export default function cliffcompaction(pi: ExtensionAPI): void {
 				originalChars: plan.stats.originalChars,
 				droppedChars: plan.stats.droppedChars,
 				excerptedChars: plan.stats.excerptedChars,
-				snap: plan.snap.reason,
+				split: prep.isSplitTurn,
 				shadow: s.cfg.shadow,
 			};
 			updateStatus(ctx);

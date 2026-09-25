@@ -8,15 +8,6 @@
 
 import { DEFAULT_TOOL_POLICY, type ToolClass, type ToolPolicy } from "./policy.ts";
 
-/** How the kept window is chosen. */
-export type RecentMode =
-	/** Token target, extended back to the enclosing turn start. Whole turns only. */
-	| "tokens-snapped"
-	/** Pi's stock token target, which may split the turn containing the boundary. */
-	| "tokens"
-	/** Strict paper Algorithm 1: keep the last K turns, no budget check. */
-	| "turns";
-
 export type ThinkingMode = "keep" | "drop";
 
 export interface CliffConfig {
@@ -29,13 +20,9 @@ export interface CliffConfig {
 	reserveFloor: number;
 
 	// --- kept window ---------------------------------------------------------
+	/** Verbatim window kept after a cliff. Pi's own knob, and the only one: its
+	 *  token-denominated cut already lands on cliff's turn boundaries. */
 	keepRecentTokens: number;
-	recentMode: RecentMode;
-	/** With `tokens-snapped`, the extra tokens we accept to keep a whole turn
-	 *  before falling back to Pi's split cut. */
-	maxTurnOvershoot: number;
-	/** `recentMode: "turns"` only. */
-	keepRecentTurns: number;
 
 	// --- compacted-region policy --------------------------------------------
 	/** Tool results longer than this are dropped or excerpted. */
@@ -65,9 +52,6 @@ export const DEFAULT_CONFIG: CliffConfig = {
 	thresholdTokens: 250_000,
 	reserveFloor: 16_384,
 	keepRecentTokens: 40_000,
-	recentMode: "tokens-snapped",
-	maxTurnOvershoot: 20_000,
-	keepRecentTurns: 3,
 
 	resultMaxChars: 500,
 	cmdMaxChars: 150,

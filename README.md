@@ -86,8 +86,6 @@ Knobs live in `~/.pi/agent/cliffcompaction.json`, with an optional project-level
 | `thresholdTokens` | 250000 | peak context at which compaction fires (realised as Pi's `reserveTokens`) |
 | `reserveFloor` | 16384 | response headroom; a normal-turn allowance, not the model's max output |
 | `keepRecentTokens` | 40000 | verbatim window kept after a cliff |
-| `recentMode` | `tokens-snapped` | whole turns only; `tokens` = Pi's splitting cut, `turns` = paper Algorithm 1 |
-| `maxTurnOvershoot` | 20000 | overshoot accepted before falling back to a split cut |
 | `resultMaxChars` | 500 | tool results longer than this are dropped or excerpted |
 | `cmdMaxChars` | 150 | tool-call signature cap |
 | `thinkingMode` | `keep` | or `drop` |

@@ -186,30 +186,26 @@ test("active mode returns a mechanical digest with our cut and details", async (
 	assert.ok(result.compaction.summary.includes("<read-files>\na.ts\n</read-files>"));
 });
 
-test("a split cut moves the kept boundary back to the turn start", async () => {
+test("a split task folds its prefix into the digest and keeps Pi's cut", async () => {
 	writeUserConfig({ shadow: false });
 	const { pi, handlers } = fakePi();
 	cliffcompaction(pi);
 	const ctx = fakeCtx();
 	await handlers.get("session_start")?.({}, ctx);
 
-	// e1 is the turn start; Pi cut at e2 mid-turn.
-	const event = compactEvent({
-		branchEntries: [
-			{ type: "message", id: "e0", message: { role: "user" } },
-			{ type: "message", id: "e1", message: { role: "user" } },
-			{ type: "message", id: "e2", message: { role: "assistant" } },
-		],
-	});
-	(event.preparation as Record<string, unknown>).firstKeptEntryId = "e2";
+	const event = compactEvent();
 	(event.preparation as Record<string, unknown>).isSplitTurn = true;
-	(event.preparation as Record<string, unknown>).turnPrefixMessages = [assistant("early part of the turn")];
+	(event.preparation as Record<string, unknown>).turnPrefixMessages = [assistant("early part of the task")];
 
 	const result = (await handlers.get("session_before_compact")?.(event, ctx)) as {
-		compaction: { firstKeptEntryId: string; summary: string };
+		compaction: { firstKeptEntryId: string; summary: string; details: Record<string, unknown> };
 	};
-	assert.equal(result.compaction.firstKeptEntryId, "e1", "snapped to the enclosing turn start");
-	assert.ok(!result.compaction.summary.includes("early part of the turn"), "prefix kept verbatim, not summarised");
+	// Pi's cut is used unchanged: moving it to the turn start would keep the whole
+	// user-message span, which in an agent run is the entire task.
+	assert.equal(result.compaction.firstKeptEntryId, "e2");
+	assert.ok(result.compaction.summary.includes("early part of the task"), "prefix summarised");
+	const details = result.compaction.details as { cliffcompaction?: { split?: boolean } };
+	assert.equal(details.cliffcompaction?.split, true, "split recorded for observability");
 });
 
 test("/compact with instructions defers to Pi", async () => {

@@ -121,8 +121,7 @@ test("good values pass through", () => {
 		{
 			thresholdTokens: 200_000.7,
 			thinkingMode: "drop",
-			recentMode: "turns",
-			shadow: false,
+						shadow: false,
 			toolPolicy: { dropTools: ["read"], unknown: "keep", alwaysKeepErrors: false },
 		},
 		"test",
@@ -130,18 +129,17 @@ test("good values pass through", () => {
 	assert.equal(warnings.length, 0);
 	assert.equal(input.thresholdTokens, 200_000, "floored to an integer");
 	assert.equal(input.thinkingMode, "drop");
-	assert.equal(input.recentMode, "turns");
-	assert.equal(input.shadow, false);
+		assert.equal(input.shadow, false);
 	assert.deepEqual(input.toolPolicy, { dropTools: ["read"], unknown: "keep", alwaysKeepErrors: false });
 });
 
 test("wrong types are dropped with a warning, never passed through", () => {
 	const { input, warnings } = sanitizeConfig(
-		{ thresholdTokens: "big", shadow: "yes", thinkingMode: "maybe", recentMode: "nope" },
+		{ thresholdTokens: "big", shadow: "yes", thinkingMode: "maybe" },
 		"test",
 	);
 	assert.deepEqual(input, {});
-	assert.equal(warnings.length, 4);
+	assert.equal(warnings.length, 3);
 });
 
 test("negative, non-finite and NaN numbers are rejected", () => {

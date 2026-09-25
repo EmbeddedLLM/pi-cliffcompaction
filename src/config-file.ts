@@ -24,7 +24,6 @@ import { dirname, join } from "node:path";
 import {
 	type CliffConfig,
 	type CliffConfigInput,
-	type RecentMode,
 	type ThinkingMode,
 	resolveConfig,
 } from "./config.ts";
@@ -80,8 +79,6 @@ const NUMBER_KEYS = [
 	"thresholdTokens",
 	"reserveFloor",
 	"keepRecentTokens",
-	"maxTurnOvershoot",
-	"keepRecentTurns",
 	"resultMaxChars",
 	"cmdMaxChars",
 	"thinkingMaxChars",
@@ -92,7 +89,6 @@ const NUMBER_KEYS = [
 ] as const;
 
 const BOOL_KEYS = ["honorManualInstructions", "shadow"] as const;
-const RECENT_MODES: readonly RecentMode[] = ["tokens-snapped", "tokens", "turns"];
 const THINKING_MODES: readonly ThinkingMode[] = ["keep", "drop"];
 const TOOL_CLASSES: readonly ToolClass[] = ["drop", "excerpt", "keep"];
 
@@ -126,10 +122,6 @@ export function sanitizeConfig(raw: unknown, where: string): { input: CliffConfi
 		if (v === undefined) continue;
 		if (typeof v === "boolean") input[key] = v;
 		else warnings.push(`${where}: ${key} must be a boolean, ignoring`);
-	}
-	if (raw.recentMode !== undefined) {
-		if (RECENT_MODES.includes(raw.recentMode as RecentMode)) input.recentMode = raw.recentMode;
-		else warnings.push(`${where}: recentMode must be one of ${RECENT_MODES.join(", ")}, ignoring`);
 	}
 	if (raw.thinkingMode !== undefined) {
 		if (THINKING_MODES.includes(raw.thinkingMode as ThinkingMode)) input.thinkingMode = raw.thinkingMode;

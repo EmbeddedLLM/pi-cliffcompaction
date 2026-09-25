@@ -257,5 +257,8 @@ test("the default config matches the shipped policy", () => {
 	assert.equal(DEFAULT_CONFIG.resultMaxChars, 500);
 	assert.equal(DEFAULT_CONFIG.cmdMaxChars, 150);
 	assert.equal(DEFAULT_CONFIG.thinkingMaxChars, 2000);
-	assert.equal(DEFAULT_CONFIG.recentMode, "tokens-snapped");
+	assert.equal(DEFAULT_CONFIG.thresholdTokens, 250_000);
+	assert.equal(DEFAULT_CONFIG.keepRecentTokens, 40_000);
+	// Shadow is on until the operator turns it off.
+	assert.equal(DEFAULT_CONFIG.shadow, true);
 });
