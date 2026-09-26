@@ -257,13 +257,14 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 			ctx.ui.notify("CliffCompaction: no session state yet", "warning");
 			return;
 		}
-		const choice = await ctx.ui.select("CliffCompaction", [
+		const mode = s.cfg.shadow ? "SHADOW — nothing will be changed" : "ACTIVE";
+		const choice = await ctx.ui.select(`CliffCompaction — ${mode}`, [
 			"Status",
 			"Activate — apply threshold and leave shadow",
 			"Set threshold (tokens) — applies immediately",
 			"Set thinking cap (chars)",
 			"Set result cap (chars)",
-			"Toggle shadow mode",
+			`${s.cfg.shadow ? "Leave" : "Enter"} shadow mode (observe only)`,
 			"Cache report",
 			"Restore defaults",
 			"Done",
@@ -334,7 +335,8 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				ctx.ui.notify(`resultMaxChars = ${n}`, "info");
 				continue;
 			}
-			case "Toggle shadow mode": {
+			case "Leave shadow mode (observe only)":
+			case "Enter shadow mode (observe only)": {
 				s.cfg = { ...s.cfg, shadow: !s.cfg.shadow };
 				saveUserConfig(s.paths, s.cfg);
 				updateStatus(ctx);

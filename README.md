@@ -19,9 +19,10 @@ the measurements behind the defaults.
 
 ## Status
 
-Working end to end, **shadow mode on by default**: it computes and reports every
-compaction but modifies nothing until you turn it off. The threshold write-back
-is applied from `/cliffcompaction`, not silently.
+Working end to end. Installing it changes nothing on its own: Pi fires at
+`window - reserveFloor` until you apply a threshold, which
+`/cliffcompaction activate` does. `shadow: true` is available to observe what the
+digest would contain without committing to it.
 
 Not built: `context_edit` eviction (deliberately — see DESIGN.md §3), and branch
 summarisation via `/tree`, which uses a separate Pi hook and stays LLM-based.
@@ -107,7 +108,7 @@ Knobs live in `~/.pi/agent/cliffcompaction.json`, with an optional project-level
 | `excerptTools` | `bash, powershell, edit, write` | side-effecting — never dropped silently |
 | `alwaysKeepErrors` | `true` | error results are never dropped |
 | `honorManualInstructions` | `true` | `/compact <instructions>` falls through to Pi's LLM summariser |
-| `shadow` | `true` | compute and report, modify nothing |
+| `shadow` | `false` | compute and report, modify nothing. Off by default: applying the threshold is the opt-in, since until then Pi never compacts anyway |
 
 The threshold is the one value that lives in Pi's own config, because Pi owns the
 trigger. It is applied as

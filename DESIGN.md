@@ -335,10 +335,14 @@ Two discrepancies worth remembering:
 - **Branch summarisation** (`/tree`) uses a separate hook, `session_before_tree`.
   It stays LLM-based: it is a one-off on branch navigation, not part of the
   trajectory.
-- **Shadow mode is on by default.** The extension computes and reports, and
-  modifies nothing until it is trusted. Verified end to end: a shadow run
-  produced one compaction with `fromHook: false` and a summarisation `usage`,
-  i.e. Pi's own LLM summary.
+- **Shadow mode exists but is off by default.** On-by-default was a mistake: it
+  is a *second* gate after the threshold, and a threshold that is applied while
+  shadow is still on means paying for Pi's LLM summary and getting none of the
+  benefit — which is exactly the state a first run landed in. The threshold is the
+  real opt-in, because until it is applied Pi fires at `window - reserveFloor` and
+  effectively never compacts. `shadow: true` remains for observing what the digest
+  would contain. Verified: a shadow run produces one compaction with
+  `fromHook: false` and a summarisation `usage`, i.e. Pi's own LLM summary.
 
 ## 11. Open items
 
@@ -594,3 +598,32 @@ This is an offline replay through the same planner the extension calls, with the
 region derived from the real cut — not a live two-compaction session, which the
 sandbox could not produce (Pi declines to re-compact once only the previous
 summary remains).
+
+## 15. Threshold geometry: why a low threshold needs a smaller keep window
+
+`floor ≈ system + keepRecentTokens + retention × (B − system − keepRecentTokens)`
+
+With the measured retention (≈1/3) and a ~51k system prompt, the floor is a large
+fraction of the threshold, so the sawtooth's headroom shrinks as B shrinks:
+
+| B | floor | cliff | growth per cycle |
+|---|---|---|---|
+| 150k | 110k (74% of B) | 1.36× | 40k |
+| 250k | 143k (57%) | 1.75× | 107k |
+| 400k | 192k (48%) | 2.08× | 208k |
+
+At B=150k with `keepRecentTokens = 40000` only ~40k of growth fits between
+compactions — a handful of turns, so compaction fires often and each cycle pays a
+re-prefill. Two levers, and the second is cheaper than it looks:
+
+| keepRecentTokens at B=150k | floor | headroom |
+|---|---|---|
+| 40000 | 110k | 40k |
+| 20000 | 97k | 53k |
+| 10000 | 90k | 60k |
+
+Halving the keep window buys 13k of headroom for 20k less verbatim context. The
+general rule: **`keepRecentTokens` should stay well under `B − system − floor`**,
+and if a low threshold is wanted, either raise B or shrink the keep window. A
+threshold of 150k with a 40k keep is workable but thrashy; the same threshold with
+a 15–20k keep is comfortable.

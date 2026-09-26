@@ -290,6 +290,6 @@ test("the default config matches the shipped policy", () => {
 	assert.equal(DEFAULT_CONFIG.thinkingMaxChars, 4000);
 	assert.equal(DEFAULT_CONFIG.thresholdTokens, 250_000);
 	assert.equal(DEFAULT_CONFIG.keepRecentTokens, 40_000);
-	// Shadow is on until the operator turns it off.
-	assert.equal(DEFAULT_CONFIG.shadow, true);
+	// Applying the threshold is the opt-in; shadow is an explicit observe mode.
+	assert.equal(DEFAULT_CONFIG.shadow, false);
 });

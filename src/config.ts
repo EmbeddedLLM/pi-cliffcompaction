@@ -44,7 +44,10 @@ export interface CliffConfig {
 	/** `/compact <instructions>` falls through to Pi's LLM summarizer: the
 	 *  instructions focus the summary, and mechanical truncation cannot honour them. */
 	honorManualInstructions: boolean;
-	/** Compute and report, but never modify a request. */
+	/** Compute and report, but never modify a request. Off by default: applying the
+	 *  threshold is already the opt-in, since until then Pi fires at
+	 *  `window - reserveFloor` and effectively never compacts. Turning this on is for
+	 *  seeing what the digest would contain without committing to it. */
 	shadow: boolean;
 }
 
@@ -72,7 +75,7 @@ export const DEFAULT_CONFIG: CliffConfig = {
 	toolPolicy: DEFAULT_TOOL_POLICY,
 
 	honorManualInstructions: true,
-	shadow: true,
+	shadow: false,
 };
 
 /** A partial config in which the one nested object is also partial. */

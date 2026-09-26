@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
 
+import { DEFAULT_CONFIG } from "./config.ts";
 import cliffcompaction from "./index.ts";
 import { SUMMARY_HEADER } from "./serialize.ts";
 
@@ -152,8 +153,15 @@ test("the factory registers the hook, a flag, and a command", () => {
 	assert.ok(registered.some((r) => r.startsWith("flag:")));
 });
 
-test("shadow mode is the default and modifies nothing", async () => {
-	clearUserConfig();
+test("the default is active: applying the threshold is the opt-in", () => {
+	// Shadow-on-by-default was a second gate that only caused confusion: without a
+	// threshold applied the extension is inert anyway, because Pi fires at
+	// window - reserveFloor.
+	assert.equal(DEFAULT_CONFIG.shadow, false);
+});
+
+test("shadow mode, when asked for, modifies nothing", async () => {
+	writeUserConfig({ shadow: true });
 	const { pi, handlers } = fakePi();
 	cliffcompaction(pi);
 	const ctx = fakeCtx();
