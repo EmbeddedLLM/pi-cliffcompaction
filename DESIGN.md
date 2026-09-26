@@ -484,3 +484,43 @@ mitigation: Algorithm 1 drops every user message except `messages[1]`, so a
 mid-session change of goal loses the revision while the superseded goal stays
 pinned. It never bites in their KernelBench setup, where the goal is stable for
 400 steps.
+
+## 14. The cache report, and what it can and cannot say
+
+Correctness is proven elsewhere. The one claim still open is the **economics** —
+that a deep cliff is cheaper than Pi's native summarisation. `/cliffcompaction
+cache` exists to answer that from real sessions rather than by argument.
+
+It reports, per session: the context-size sawtooth, cached vs uncached input,
+output, cost when the provider supplies it, the compaction count, how many
+requests immediately follow a cliff, what those cost, and the amortisation
+(`requests per cliff`). It also counts cache collapses that *no* compaction
+explains, so a provider TTL expiry cannot be read as a cost of this extension.
+
+### `cacheRead` cannot distinguish a cheap cliff from a warm cache
+
+Found by running the instrument against the session measured in §12:
+
+```
+[1164] assistant  ctx=467,534  input=270    cacheRead=467,264   out=78,681
+[1165] compaction
+[1168] assistant  ctx=242,776  input=216    cacheRead=242,560   out=42
+```
+
+The request after the cliff read 242,560 tokens *from cache* — the opposite of
+§12's measurement, where the same event showed `input=242,776, cacheRead=0` with
+the same 242,776-token context.
+
+Both are correct, and the explanation is a testing artifact: the two runs used the
+same source session against the same provider account and produced a
+**byte-identical** compaction — same `firstKeptEntryId` (`bd33a1aa`) and the same
+608,518-char digest. The first run therefore paid the uncached re-prefill and
+warmed the cache; the second run's request hit it. The replay's file contains only
+the second, so the cost appears nowhere in it.
+
+The consequence for the report is a limit worth stating rather than hiding: a low
+`cacheRead` on a post-cliff request can mean either a genuinely cheap cliff or a
+provider that still had the identical prefix. The report says which reading it is
+(`note ... served from cache`) and makes no causal claim in either direction.
+Establishing the real amortisation needs one clean long session with no repeated
+content — which is exactly what watching your own runs provides.

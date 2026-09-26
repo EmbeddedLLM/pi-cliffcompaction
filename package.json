@@ -4,9 +4,18 @@
   "private": true,
   "description": "CliffCompaction for Pi: mechanical, truncate-only context compaction",
   "type": "module",
+  "keywords": ["pi-package", "compaction", "context", "agents"],
+  "license": "MIT",
+  "pi": {
+    "extensions": ["./src/index.ts"]
+  },
+  "files": ["src", "README.md", "DESIGN.md", "LICENSE"],
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.1",

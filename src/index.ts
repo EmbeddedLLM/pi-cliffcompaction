@@ -24,6 +24,7 @@ import {
 } from "./compact.ts";
 import type { CliffConfig, CliffConfigInput } from "./config.ts";
 import { type ConfigPaths, configFilePaths, loadConfig, saveUserConfig } from "./config-file.ts";
+import { type RequestSample, buildCacheReport, formatCacheReport } from "./report.ts";
 import { SUMMARY_HEADER } from "./serialize.ts";
 import {
 	effectiveThresholdLabel,
@@ -40,6 +41,22 @@ interface SessionEntryLike {
 	readonly type?: string;
 	readonly id?: string;
 	readonly details?: unknown;
+	readonly message?: {
+		readonly role?: string;
+		readonly usage?: UsageLike;
+	};
+}
+
+interface UsageLike {
+	readonly input?: number;
+	readonly output?: number;
+	readonly cacheRead?: number;
+	readonly cacheWrite?: number;
+	readonly cost?: { readonly total?: number };
+}
+
+function num(v: unknown): number {
+	return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
 
 interface LastRun {
@@ -166,6 +183,64 @@ async function applyThreshold(ctx: ExtensionCommandContext): Promise<string> {
 	return `applied for ${key}: fires at ~${effectiveThresholdLabel(model.contextWindow, reserve)}, keeps ~${Math.round(keep / 1000)}k`;
 }
 
+async function activate(ctx: ExtensionCommandContext): Promise<string> {
+	const s = state;
+	if (!s) return "not initialised";
+	const applied = await applyThreshold(ctx);
+	if (!applied.startsWith("applied")) return applied;
+	// One command for setup: the threshold alone leaves the extension inert, since
+	// shadow mode is on by default.
+	s.cfg = { ...s.cfg, shadow: false };
+	saveUserConfig(s.paths, s.cfg);
+	return `${applied}; shadow off — compactions now use the mechanical digest`;
+}
+
+// --- cache report -----------------------------------------------------------
+
+/**
+ * Turn the current branch into cache samples.
+ *
+ * One sample per model request. `afterCompaction` marks the request following a
+ * compaction entry — the re-prefill the cliff pays for. The flag is held until the
+ * next request, since user messages and other entries may sit in between.
+ */
+function collectSamples(entries: readonly SessionEntryLike[]): {
+	samples: RequestSample[];
+	compactions: number;
+} {
+	const samples: RequestSample[] = [];
+	let compactions = 0;
+	let afterCompaction = false;
+	for (const e of entries) {
+		if (e.type === "compaction") {
+			compactions++;
+			afterCompaction = true;
+			continue;
+		}
+		if (e.type !== "message") continue;
+		const m = e.message;
+		if (!m || m.role !== "assistant" || m.usage === undefined) continue;
+		const u = m.usage;
+		const cost = u.cost?.total;
+		samples.push({
+			input: num(u.input),
+			cacheRead: num(u.cacheRead),
+			cacheWrite: num(u.cacheWrite),
+			output: num(u.output),
+			...(typeof cost === "number" && Number.isFinite(cost) ? { costUsd: cost } : {}),
+			afterCompaction,
+		});
+		afterCompaction = false;
+	}
+	return { samples, compactions };
+}
+
+function cacheReportText(ctx: ExtensionContext): string {
+	const entries = ctx.sessionManager.getBranch() as unknown as readonly SessionEntryLike[];
+	const { samples, compactions } = collectSamples(entries);
+	return formatCacheReport(buildCacheReport(samples, compactions));
+}
+
 // --- command ----------------------------------------------------------------
 
 function parsePositiveInt(v: string | undefined): number | null {
@@ -184,11 +259,12 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 		}
 		const choice = await ctx.ui.select("CliffCompaction", [
 			"Status",
-			"Apply threshold to Pi settings",
-			"Set threshold (tokens)…",
-			"Set thinking cap (chars)…",
-			"Set result cap (chars)…",
+			"Activate — apply threshold and leave shadow",
+			"Set threshold (tokens) — applies immediately",
+			"Set thinking cap (chars)",
+			"Set result cap (chars)",
 			"Toggle shadow mode",
+			"Cache report",
 			"Restore defaults",
 			"Done",
 		]);
@@ -198,6 +274,20 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 			case "Status":
 				ctx.ui.notify(statusText(ctx), "info");
 				continue;
+			case "Cache report":
+				ctx.ui.notify(cacheReportText(ctx), "info");
+				continue;
+			case "Activate — apply threshold and leave shadow": {
+				const ok = await ctx.ui.confirm(
+					"Activate CliffCompaction",
+					"Write the threshold into Pi's settings and stop running in shadow mode?",
+				);
+				if (!ok) continue;
+				const msg = await activate(ctx);
+				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
+				if (msg.startsWith("applied")) await ctx.reload();
+				return;
+			}
 			case "Apply threshold to Pi settings": {
 				const msg = await applyThreshold(ctx);
 				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
@@ -207,7 +297,7 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				if (msg.startsWith("applied")) await ctx.reload();
 				return;
 			}
-			case "Set threshold (tokens)…": {
+			case "Set threshold (tokens) — applies immediately": {
 				const n = parsePositiveInt(await ctx.ui.input("Compaction threshold B (tokens)", String(s.cfg.thresholdTokens)));
 				if (n === null) {
 					ctx.ui.notify("not a number, unchanged", "warning");
@@ -215,10 +305,14 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				}
 				s.cfg = { ...s.cfg, thresholdTokens: n };
 				saveUserConfig(s.paths, s.cfg);
-				ctx.ui.notify(`thresholdTokens = ${n}. Use "Apply threshold" to make Pi fire there.`, "info");
-				continue;
+				// Applied here rather than left as a separate step: a threshold the user
+				// has to remember to apply is a threshold that silently does nothing.
+				const msg = await applyThreshold(ctx);
+				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
+				if (msg.startsWith("applied")) await ctx.reload();
+				return;
 			}
-			case "Set thinking cap (chars)…": {
+			case "Set thinking cap (chars)": {
 				const n = parsePositiveInt(await ctx.ui.input("Thinking cap per message (0 = unlimited)", String(s.cfg.thinkingMaxChars)));
 				if (n === null) {
 					ctx.ui.notify("not a number, unchanged", "warning");
@@ -229,7 +323,7 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				ctx.ui.notify(`thinkingMaxChars = ${n}`, "info");
 				continue;
 			}
-			case "Set result cap (chars)…": {
+			case "Set result cap (chars)": {
 				const n = parsePositiveInt(await ctx.ui.input("Tool-result cap (chars)", String(s.cfg.resultMaxChars)));
 				if (n === null) {
 					ctx.ui.notify("not a number, unchanged", "warning");
@@ -344,8 +438,12 @@ export default function cliffcompaction(pi: ExtensionAPI): void {
 				ctx.ui.notify(statusText(ctx), "info");
 				return;
 			}
-			if (verb === "apply") {
-				const msg = await applyThreshold(ctx);
+			if (verb === "cache") {
+				ctx.ui.notify(cacheReportText(ctx), "info");
+				return;
+			}
+			if (verb === "apply" || verb === "activate") {
+				const msg = verb === "activate" ? await activate(ctx) : await applyThreshold(ctx);
 				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
 				if (msg.startsWith("applied")) await ctx.reload();
 				return;
