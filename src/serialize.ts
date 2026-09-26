@@ -115,7 +115,10 @@ export interface SerializationStats {
 	droppedChars: number;
 	/** Chars removed from results that were kept as an excerpt. */
 	excerptedChars: number;
+	/** Messages whose joined thinking text was cut to the cap. */
 	thinkingTruncated: number;
+	/** Chars removed by that cut. */
+	thinkingCharsRemoved: number;
 }
 
 function newStats(): SerializationStats {
@@ -129,6 +132,7 @@ function newStats(): SerializationStats {
 		droppedChars: 0,
 		excerptedChars: 0,
 		thinkingTruncated: 0,
+		thinkingCharsRemoved: 0,
 	};
 }
 
@@ -158,7 +162,15 @@ function serializeAssistant(m: AnyMsg, cfg: CliffConfig, stats: SerializationSta
 	const lines: string[] = [];
 	// Signed thinking blocks are never re-sent from the compacted region — only
 	// their text, and only as text. A signature without its block is unusable.
-	const think = truncate(thinking.join("\n").trim(), cfg.thinkingMaxChars);
+	// The cap applies to the joined text of the message, so the counter must too:
+	// measuring per block missed a message whose blocks were individually small
+	// but collectively over the cap.
+	const joinedThinking = thinking.join("\n").trim();
+	const think = truncate(joinedThinking, cfg.thinkingMaxChars);
+	if (cfg.thinkingMaxChars > 0 && joinedThinking.length > cfg.thinkingMaxChars) {
+		stats.thinkingTruncated++;
+		stats.thinkingCharsRemoved += joinedThinking.length - think.length;
+	}
 	if (think) lines.push(`thinking: ${think}`);
 	const text = truncate(texts.join("\n").trim(), cfg.thoughtMaxChars);
 	if (text) lines.push(`assistant: ${text}`);

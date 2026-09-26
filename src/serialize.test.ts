@@ -150,6 +150,22 @@ test("thinking is capped per message by thinkingMaxChars", () => {
 	assert.ok(!out.includes("T".repeat(2001)));
 });
 
+test("the thinking cap counts the joined text, not each block", () => {
+	// Regression: two 1500-char blocks are individually under a 2000 cap but
+	// jointly over it, so the message was truncated without being counted.
+	const a = assistant([thinking("A".repeat(1500)), thinking("B".repeat(1500))]);
+	const { stats } = renderSummary([a], cfg({ thinkingMaxChars: 2000 }));
+	assert.equal(stats.thinkingTruncated, 1);
+	assert.ok(stats.thinkingCharsRemoved > 900);
+});
+
+test("nothing is reported as truncated when it fits", () => {
+	const a = assistant([thinking("A".repeat(100)), thinking("B".repeat(100))]);
+	const { stats } = renderSummary([a], cfg({ thinkingMaxChars: 2000 }));
+	assert.equal(stats.thinkingTruncated, 0);
+	assert.equal(stats.thinkingCharsRemoved, 0);
+});
+
 test("thinkingMaxChars 0 means unlimited", () => {
 	const out = serializeConversation([assistant([thinking("T".repeat(5000))])], cfg({ thinkingMaxChars: 0 }));
 	assert.ok(out.includes("T".repeat(5000)));

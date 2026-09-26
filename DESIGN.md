@@ -328,3 +328,67 @@ not expose `compaction.*`. Two properties are tested rather than assumed — an
 unparseable file stops the write instead of being clobbered, and every key we do
 not own survives — and the panel reports the effective threshold read back from
 the file, so a hand edit cannot silently disagree with what is displayed.
+
+## 12. Live-session measurement at the real threshold
+
+Measured by resuming a real 546,215-token session (deepseek, 1,166 entries) with
+`reserveTokens = 750000`, i.e. a genuine 250k threshold, `keepRecentTokens = 40000`,
+thinking capped at 2000. Sandboxed via `PI_CODING_AGENT_DIR`; the original session
+file was copied, never modified.
+
+```
+compaction 1   fromHook=True   llm_call=False   tokensBefore=546,215
+               messages=1160  kept=240  dropped=59  excerpted=218
+               readFiles=19  modifiedFiles=12   digest=151,523 tokens
+next request   input=242,776   cacheRead=0        <- full re-prefill after the cliff
+```
+
+Zero auxiliary LLM calls, confirmed at scale: no `usage` on the compaction entry.
+The file map survived. The call after the cliff read nothing from cache, which is
+exactly the re-prefill the paper says a cliff costs.
+
+Replaying the same region through the serializer offline with the same config
+reproduced the digest exactly (32.7% retained; 59 dropped, 218 excerpted, 240 kept),
+so the in-Pi and offline paths are identical.
+
+### Retention is ~1/3 of the region, and that sets the cliff floor
+
+Digest composition at the shipped caps: thinking 31.6%, tool-call signatures ~21%,
+results 16.9%, assistant text 15.9%, user 14.1%. All caps verified enforced
+(largest thinking block 2,014 vs cap 2,000; largest result 498 vs 500; largest user
+block 20,011 vs 20,000).
+
+Same real region under different policies:
+
+| thinking | assistant text | digest | retained |
+|---|---|---|---|
+| 2000 | unlimited (shipped) | 151,523 | 32.7% |
+| 2000 | 300 | 135,063 | 29.1% |
+| 300 | 300 (paper) | 111,437 | 24.0% |
+| dropped | unlimited | 103,413 | 22.3% |
+| dropped | 300 | 86,952 | 18.7% |
+
+So the floor is roughly
+
+```
+floor ≈ system + keepRecentTokens + retention × (threshold − system − keepRecentTokens)
+```
+
+At a 250k threshold with a ~51k system prompt and 40k keep, the region is ~159k,
+the digest ~52k, and the floor ~143k — a 1.75× cliff with ~107k of growth per cycle.
+Workable, but the structural fact to know is that **the digest is about a third of
+the region, so the floor is about a third of the threshold**; a threshold whose
+headroom is smaller than that will compact repeatedly.
+
+The observed run compacted a 546k *backlog* (a resumed, already-oversized session),
+so its floor of 240k landed just under the 250k threshold and a second compaction
+followed immediately. That is a transient of resuming an oversized session, not
+steady-state thrash — at steady state Pi compacts at ~B, not at 2×B.
+
+### One bug this found
+
+`thinkingTruncated` counted per thinking block while the cap is applied to the
+message's joined text, so a message with several individually-small blocks was
+truncated without being counted (17 reported against a much larger real number).
+Fixed, with a regression test, and `thinkingCharsRemoved` added so the removed
+volume is visible rather than implied.
