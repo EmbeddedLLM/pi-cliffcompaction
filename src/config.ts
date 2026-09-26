@@ -123,3 +123,30 @@ export function reserveTokensFor(cfg: CliffConfig, contextWindow: number): numbe
 export function effectiveThreshold(contextWindow: number, reserveTokens: number): number {
 	return contextWindow - reserveTokens;
 }
+
+/**
+ * Only the values that differ from the shipped defaults.
+ *
+ * Saving the whole resolved config would freeze every default at write time, so a
+ * later improvement to a default would never reach an existing install — and the
+ * file would stop being readable as "what you actually chose". Found the hard way:
+ * a first run baked `shadow: true` into the file, which then overrode the corrected
+ * default.
+ */
+export function diffFromDefaults(cfg: CliffConfig): CliffConfigInput {
+	const out: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(cfg)) {
+		if (key === "toolPolicy") {
+			const sub: Record<string, unknown> = {};
+			const defaults = DEFAULT_CONFIG.toolPolicy as unknown as Record<string, unknown>;
+			for (const [k, v] of Object.entries(value as ToolPolicy)) {
+				if (JSON.stringify(v) !== JSON.stringify(defaults[k])) sub[k] = v;
+			}
+			if (Object.keys(sub).length > 0) out[key] = sub;
+			continue;
+		}
+		const dflt = (DEFAULT_CONFIG as unknown as Record<string, unknown>)[key];
+		if (JSON.stringify(value) !== JSON.stringify(dflt)) out[key] = value;
+	}
+	return out as CliffConfigInput;
+}

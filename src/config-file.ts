@@ -25,6 +25,7 @@ import {
 	type CliffConfig,
 	type CliffConfigInput,
 	type ThinkingMode,
+	diffFromDefaults,
 	resolveConfig,
 } from "./config.ts";
 import type { ToolClass } from "./policy.ts";
@@ -204,7 +205,10 @@ export function saveUserConfig(paths: ConfigPaths, cfg: CliffConfig): void {
 	const path = configFilePaths(paths).userConfig;
 	mkdirSync(dirname(path), { recursive: true });
 	const tmp = `${path}.tmp`;
-	writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+	// Only the diff from the defaults, so a later change to a default still reaches
+	// an install that has already saved once. Writing the whole resolved config
+	// would freeze every default at write time.
+	writeFileSync(tmp, `${JSON.stringify(diffFromDefaults(cfg), null, 2)}\n`, "utf8");
 	renameSync(tmp, path);
 }
 

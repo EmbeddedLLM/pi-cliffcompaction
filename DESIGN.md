@@ -627,3 +627,26 @@ general rule: **`keepRecentTokens` should stay well under `B − system − floo
 and if a low threshold is wanted, either raise B or shrink the keep window. A
 threshold of 150k with a 40k keep is workable but thrashy; the same threshold with
 a 15–20k keep is comfortable.
+
+## 16. Saving only the diff
+
+The menu writes `~/.pi/agent/cliffcompaction.json`, and it used to write the whole
+*resolved* config. That froze every default at write time, with two consequences:
+
+- A later improvement to a default would never reach an install that had saved once.
+- The file stopped being readable as "what you actually chose".
+
+Both bit in practice. A first real run had `shadow: true` (the old default) baked
+into the file, so correcting the default in code changed nothing for that install —
+the explicit `true` won. The threshold was applied, shadow was still on, and the
+result was the worst state available: paying for Pi's LLM summarisation with none
+of this extension's benefit.
+
+`saveUserConfig` now writes only the fields that differ from `DEFAULT_CONFIG`,
+including per-field inside `toolPolicy`. So the file is a short statement of
+intent (`{"thresholdTokens": 150000}`), an untouched config saves as `{}`, and
+improving a default reaches everyone who did not explicitly set it.
+
+There is no migration for a file written the old way — the explicit values are
+still honoured, which is correct — but "Restore defaults" now writes `{}` and
+clears the freeze.

@@ -109,6 +109,37 @@ test("saveUserConfig round-trips and creates the directory", () => {
 	assert.equal(loadConfig(fresh).cfg.thresholdTokens, 999);
 });
 
+test("saving writes only the diff, so later default changes still reach an install", () => {
+	// Regression: the whole resolved config used to be written, which baked every
+	// default into the file -- including `shadow: true`, which then overrode the
+	// corrected default and left a real run paying for Pi's LLM summary.
+	const fresh: ConfigPaths = { agentDir: tmp("cliff-diff-agent-"), cwd: tmp("cliff-diff-cwd-") };
+	const cfg = { ...DEFAULT_CONFIG, thresholdTokens: 150_000, thinkingMaxChars: 8000 };
+	saveUserConfig(fresh, cfg);
+	const written = JSON.parse(readFileSync(configFilePaths(fresh).userConfig, "utf8")) as Record<string, unknown>;
+	assert.deepEqual(Object.keys(written).sort(), ["thinkingMaxChars", "thresholdTokens"]);
+	assert.equal(written.shadow, undefined, "an unset default is not frozen into the file");
+	assert.equal(loadConfig(fresh).cfg.shadow, DEFAULT_CONFIG.shadow, "so the default still applies");
+	assert.equal(loadConfig(fresh).cfg.thinkingMaxChars, 8000);
+});
+
+test("an untouched config saves as an empty object", () => {
+	const fresh: ConfigPaths = { agentDir: tmp("cliff-def-agent-"), cwd: tmp("cliff-def-cwd-") };
+	saveUserConfig(fresh, DEFAULT_CONFIG);
+	const written = JSON.parse(readFileSync(configFilePaths(fresh).userConfig, "utf8")) as Record<string, unknown>;
+	assert.deepEqual(written, {});
+});
+
+test("a changed toolPolicy saves only the changed sub-key", () => {
+	const fresh: ConfigPaths = { agentDir: tmp("cliff-tp-agent-"), cwd: tmp("cliff-tp-cwd-") };
+	saveUserConfig(fresh, { ...DEFAULT_CONFIG, toolPolicy: { ...DEFAULT_CONFIG.toolPolicy, dropTools: ["bash"] } });
+	const written = JSON.parse(readFileSync(configFilePaths(fresh).userConfig, "utf8")) as {
+		toolPolicy?: Record<string, unknown>;
+	};
+	assert.deepEqual(written.toolPolicy, { dropTools: ["bash"] });
+	assert.deepEqual(loadConfig(fresh).cfg.toolPolicy.excerptTools, DEFAULT_CONFIG.toolPolicy.excerptTools);
+});
+
 test("existingConfigFiles lists only what is there", () => {
 	writeJson(files.userConfig, { thresholdTokens: 333 });
 	assert.deepEqual(existingConfigFiles(paths), [files.userConfig]);
