@@ -106,7 +106,8 @@ Be explicit about what is and is not a deviation from the paper.
 - **`isError` results are never dropped** — highest signal, and the proxy had no
   such signal.
 - **Unknown tools are excerpted rather than dropped** (safe default, overridable).
-- **Thinking is capped at 2000 chars, not the paper's 300.** See §6.
+- **Thinking is capped at 4000 chars, not the paper's 300.** See §6 for the
+  measured distribution that chose it.
 
 ### Genuine deviations
 
@@ -129,7 +130,7 @@ below touches it.
 
 | Content | Treatment |
 |---|---|
-| assistant thinking | `thinking: …`, capped per message (`thinkingMode: keep`); signature dropped |
+| assistant thinking | `thinking: …`, capped per message (`thinkingMode: keep`, 4000); signature dropped; a cut is marked |
 | assistant visible text | `assistant: …`, capped by `thoughtMaxChars` (0 = unlimited) |
 | assistant tool call | `[name] {args}` with args capped by `cmdMaxChars` |
 | tool result, ≤ `resultMaxChars` | verbatim |
@@ -186,25 +187,56 @@ compaction 2  fromHook=True  llm_call=False  split=False  dropped 21016ch  kept 
 
 `split` is still recorded in `details.cliffcompaction` for observability.
 
-## 6. Why 2000 for thinking
+## 6. Why 4000 for thinking, and why the cap barely matters
 
 The paper truncates thinking to 300 chars, justified by *"Agent thoughts … are
 not a major source of context bloat"*. That holds in their setting, where tool
 traffic is 84% of tokens. It does not hold here: **thinking is 25.1% of all
 context chars** across 64 real Pi sessions.
 
-Since the digest retains thinking at its cap, the cap largely determines the
-cliff depth. For a 230k-token compacted region:
+But the cap is a weaker lever than it looks, because thinking is extremely
+heavy-tailed. Measured over the 566 thinking blocks of one real session:
 
-| `thinkingMaxChars` | digest | post-compaction | cliff |
-|---|---|---|---|
-| 0 (unlimited) | ~89k | ~130k | shallow; ~2.5× more compactions |
-| **2000 (default)** | **~60k** | **~100k** | **balanced** |
-| 300 (paper) | ~36k | ~76k | deepest |
+| | mean | p50 | p75 | p90 | p95 | p99 | max |
+|---|---|---|---|---|---|---|---|
+| chars | 1,041 | 116 | 391 | 932 | 1,369 | 3,923 | **332,753** |
 
-2000 roughly halves thinking's contribution while keeping the substance.
-Truncating the *visible* assistant text (`thoughtMaxChars`) is a different matter
-and defaults to unlimited: it is only 5.9% of context, so capping it saves
+That single largest block is **56% of all thinking text in the session**, and 28%
+of blocks hold 93% of the characters. So the cap curve is flat:
+
+| `thinkingMaxChars` | thinking text removed | blocks over the cap |
+|---|---|---|
+| 300 (paper) | 84.5% | 161 / 566 (28%), holding 93% of the text |
+| 1000 | 73.0% | 52 (9%), holding 82% |
+| 2000 | 68.1% | 18 (3%), holding 74% |
+| **4000 (default)** | **65.0%** | **5 (1%), holding 68%** |
+| unlimited | 0% | — |
+
+4000 therefore sits at the flat end: it keeps noticeably more reasoning than 2000
+for roughly 1–2% more digest, and anything above it buys almost nothing. The real
+lever is not the cap value but whether to keep thinking at all — unlimited
+retention is the remaining ~31% of the digest, which is what `thinkingMode: drop`
+exists for.
+
+### What truncation says
+
+A cut appends a marker stating that content was removed and how much:
+
+```
+thinking: <first 4000 chars>[... 12 chars truncated ...]
+result:   <head>\n[... 840 chars omitted ...]\n<tail>
+```
+
+Two distinct words, because they are two distinct events: **truncated** means only
+the head survived, **omitted** means the middle went and the tail follows. A bare
+`...` was rejected: it is indistinguishable from prose or code that ends in an
+ellipsis, so a truncated *user instruction* reads as a complete one and the model's
+own truncated reasoning reads as having concluded where it actually stopped. The
+count also tells the model whether seeking the rest is worth a tool call. The cost
+is ~8 tokens per marker.
+
+Truncating the *visible* assistant text (`thoughtMaxChars`) remains a different
+matter and defaults to unlimited: it is only 5.9% of context, so capping it saves
 almost nothing while risking exactly the plan statements the paper's precision
 argument wants to protect.
 
@@ -273,7 +305,7 @@ The three disagree, which is why these are documented rather than inherited.
 | system prompt | kept (`messages[0]`) | head, verbatim | regenerated checkpoint | Pi's |
 | first user message | kept (`messages[1]`) | head, verbatim | inside the summarised region | carried verbatim via `details` |
 | other user messages | **not handled → dropped** | verbatim in summary | summarised | kept, capped |
-| assistant thinking | `Truncate(·, 300)` | **unlimited** | summarised | 2000 |
+| assistant thinking | `Truncate(·, 300)` | **unlimited** | summarised | 4000 |
 | assistant text | `Truncate(·, 300)` | **unlimited** | summarised | unlimited |
 | tool call | `Signature(·, 150)` | 150 | summarised | 150 |
 | tool result ≤ 500 | kept | kept | summarised | kept |
@@ -334,7 +366,8 @@ the file, so a hand edit cannot silently disagree with what is displayed.
 
 Measured by resuming a real 546,215-token session (deepseek, 1,166 entries) with
 `reserveTokens = 750000`, i.e. a genuine 250k threshold, `keepRecentTokens = 40000`,
-thinking capped at 2000. Sandboxed via `PI_CODING_AGENT_DIR`; the original session
+thinking capped at 2000 (the default at the time; now 4000). Sandboxed via
+`PI_CODING_AGENT_DIR`; the original session
 file was copied, never modified.
 
 ```
@@ -359,7 +392,8 @@ results 16.9%, assistant text 15.9%, user 14.1%. All caps verified enforced
 (largest thinking block 2,014 vs cap 2,000; largest result 498 vs 500; largest user
 block 20,011 vs 20,000).
 
-Same real region under different policies:
+Same real region under different policies (retention is measured, so these
+numbers stand regardless of which cap ships):
 
 | thinking | assistant text | digest | retained |
 |---|---|---|---|

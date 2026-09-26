@@ -96,10 +96,10 @@ Knobs live in `~/.pi/agent/cliffcompaction.json`, with an optional project-level
 | `thresholdTokens` | 250000 | peak context at which compaction fires (realised as Pi's `reserveTokens`) |
 | `reserveFloor` | 16384 | response headroom; a normal-turn allowance, not the model's max output |
 | `keepRecentTokens` | 40000 | verbatim window kept after a cliff |
-| `resultMaxChars` | 500 | tool results longer than this are dropped or excerpted |
+| `resultMaxChars` | 500 | tool results longer than this are dropped or excerpted. Cuts are marked `[... N chars truncated ...]` or `[... N chars omitted ...]`, never a bare `...` |
 | `cmdMaxChars` | 150 | tool-call signature cap |
 | `thinkingMode` | `keep` | or `drop` |
-| `thinkingMaxChars` | 2000 | per assistant message; 0 = unlimited |
+| `thinkingMaxChars` | 4000 | per assistant message; 0 = unlimited. Chosen from the measured distribution (see DESIGN.md §6) |
 | `thoughtMaxChars` | 0 | visible assistant text; 0 = unlimited |
 | `humanMaxChars` | 20000 | per user message |
 | `excerptHead` / `excerptTail` | 300 / 200 | for results that cannot be regenerated |

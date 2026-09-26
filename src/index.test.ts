@@ -296,7 +296,7 @@ test("a bad value in the config file is dropped with a warning, not applied", as
 	await command.handler("status", ctx);
 
 	const report = ctx.notifications.join("\n");
-	assert.ok(report.includes("thinking≤2000"), "a string cap falls back to the shipped default");
+	assert.ok(report.includes("thinking≤4000"), "a string cap falls back to the shipped default");
 	assert.ok(report.includes("results>500"), "a negative cap is rejected, not applied");
 	assert.ok(report.includes("must be a non-negative finite number"), "and the rejection is reported");
 });

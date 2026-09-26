@@ -19,6 +19,7 @@ import {
 	shouldDeferToPi,
 } from "./compact.ts";
 import { type CliffConfigInput, resolveConfig } from "./config.ts";
+import { truncatedMarker } from "./serialize.ts";
 import type { AnyMsg, AssistantMsg, ToolResultMsg, UserMsg } from "./types.ts";
 
 const cfg = (over: CliffConfigInput = {}) => resolveConfig(over);
@@ -187,7 +188,7 @@ test("the carried task is capped by humanMaxChars, like any human text", () => {
 		previous: { details: { task: huge } },
 		cfg: cfg(),
 	});
-	assert.ok(plan.summary.includes("T".repeat(20_000) + "..."));
+	assert.ok(plan.summary.includes("T".repeat(20_000) + truncatedMarker(30_000)));
 	assert.ok(!plan.summary.includes("T".repeat(20_001)));
 });
 
@@ -272,7 +273,7 @@ test("the thinking cap reaches the digest", () => {
 		content: [{ type: "thinking", thinking: "T".repeat(5000) }, { type: "text", text: "step" }],
 	};
 	const plan = planCompaction({ prep: prep({ messagesToSummarize: [withThinking] }), cfg: cfg({ thinkingMaxChars: 100 }) });
-	assert.ok(plan.summary.includes("T".repeat(100) + "..."));
+	assert.ok(plan.summary.includes("T".repeat(100) + truncatedMarker(4900)));
 	assert.ok(!plan.summary.includes("T".repeat(101)));
 });
 

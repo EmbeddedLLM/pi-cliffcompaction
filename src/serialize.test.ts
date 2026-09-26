@@ -14,9 +14,11 @@ import {
 	SUMMARY_HEADER,
 	canonicalJson,
 	excerpt,
+	omittedMarker,
 	renderSummary,
 	serializeConversation,
 	truncate,
+	truncatedMarker,
 } from "./serialize.ts";
 import type { AssistantMsg, ContentBlock, ToolResultMsg, UserMsg } from "./types.ts";
 
@@ -53,8 +55,21 @@ const call = (name: string, args: Record<string, unknown>): ContentBlock => ({
 test("truncate treats 0 as unlimited", () => {
 	assert.equal(truncate("abcdef", 0), "abcdef");
 	assert.equal(truncate("abcdef", -1), "abcdef");
-	assert.equal(truncate("abcdef", 3), "abc...");
 	assert.equal(truncate("abc", 3), "abc");
+});
+
+test("truncation says what it removed, rather than a bare ellipsis", () => {
+	// A bare "..." is indistinguishable from prose that ends in one, so a cut
+	// instruction reads as a complete one.
+	const out = truncate("abcdefghij", 4);
+	assert.equal(out, `abcd${truncatedMarker(6)}`);
+	assert.ok(out.includes("6 chars truncated"));
+});
+
+test("the two markers are distinguishable: truncated (head only) vs omitted (both ends)", () => {
+	assert.ok(truncatedMarker(10).includes("truncated"));
+	assert.ok(omittedMarker(10).includes("omitted"));
+	assert.notEqual(truncatedMarker(10), omittedMarker(10));
 });
 
 test("excerpt keeps both ends and counts what it removed", () => {
@@ -146,7 +161,7 @@ test("thinking is kept as text, and its signature never appears", () => {
 test("thinking is capped per message by thinkingMaxChars", () => {
 	const a = assistant([thinking("T".repeat(5000))]);
 	const out = serializeConversation([a], cfg({ thinkingMaxChars: 2000 }));
-	assert.ok(out.includes("T".repeat(2000) + "..."));
+	assert.ok(out.includes("T".repeat(2000) + truncatedMarker(3000)));
 	assert.ok(!out.includes("T".repeat(2001)));
 });
 
@@ -183,7 +198,7 @@ test("assistant visible text is capped independently of thinking", () => {
 	const a = assistant([thinking("KEEP-ME-INTACT"), text("V".repeat(4000))]);
 	const out = serializeConversation([a], cfg({ thoughtMaxChars: 300, thinkingMaxChars: 0 }));
 	assert.ok(out.includes("KEEP-ME-INTACT"));
-	assert.ok(out.includes("V".repeat(300) + "..."));
+	assert.ok(out.includes("V".repeat(300) + truncatedMarker(4000 - 300)));
 });
 
 // --- user and Pi-specific roles ---------------------------------------------
@@ -272,7 +287,7 @@ test("stats account for what was dropped", () => {
 test("the default config matches the shipped policy", () => {
 	assert.equal(DEFAULT_CONFIG.resultMaxChars, 500);
 	assert.equal(DEFAULT_CONFIG.cmdMaxChars, 150);
-	assert.equal(DEFAULT_CONFIG.thinkingMaxChars, 2000);
+	assert.equal(DEFAULT_CONFIG.thinkingMaxChars, 4000);
 	assert.equal(DEFAULT_CONFIG.thresholdTokens, 250_000);
 	assert.equal(DEFAULT_CONFIG.keepRecentTokens, 40_000);
 	// Shadow is on until the operator turns it off.

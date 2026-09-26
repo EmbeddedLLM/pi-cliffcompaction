@@ -44,11 +44,32 @@ export const SUMMARY_HEADER =
 
 // --- primitives -------------------------------------------------------------
 
-/** `max <= 0` means unlimited. Mirrors the upstream repo's convention. */
+/** Marker for a truncation that kept only the head. */
+export function truncatedMarker(removed: number): string {
+	return `[... ${removed} chars truncated ...]`;
+}
+
+/** Marker for an excerpt that kept both ends. */
+export function omittedMarker(removed: number): string {
+	return `[... ${removed} chars omitted ...]`;
+}
+
+/**
+ * Keep the head, drop the rest.
+ *
+ * The marker states that content was removed, and how much. A bare `...` is
+ * ambiguous — it is indistinguishable from prose or code that ends in an ellipsis
+ * — and the failure mode is a silent misreading: a truncated user instruction
+ * looks like a complete one, and the model's own truncated reasoning looks like it
+ * concluded where it actually stopped. The count also tells the model whether
+ * seeking the rest (re-reading a file, re-asking) is worth a call.
+ *
+ * `max <= 0` means unlimited, matching the upstream repo's convention.
+ */
 export function truncate(text: string, max: number): string {
 	if (!max || max <= 0) return text;
 	if (text.length <= max) return text;
-	return text.slice(0, max) + "...";
+	return `${text.slice(0, max)}${truncatedMarker(text.length - max)}`;
 }
 
 /** Head and tail with an explicit count of what was removed. Used where a
@@ -60,7 +81,7 @@ export function excerpt(text: string, head: number, tail: number): string {
 	if (text.length <= h + t) return text;
 	const omitted = text.length - h - t;
 	const tailPart = t > 0 ? `\n${text.slice(-t)}` : "";
-	return `${text.slice(0, h)}\n[... ${omitted} chars omitted ...]${tailPart}`;
+	return `${text.slice(0, h)}\n${omittedMarker(omitted)}${tailPart}`;
 }
 
 /** Deterministic JSON, so a digest does not depend on key insertion order. */

@@ -56,7 +56,15 @@ export const DEFAULT_CONFIG: CliffConfig = {
 	resultMaxChars: 500,
 	cmdMaxChars: 150,
 	thinkingMode: "keep",
-	thinkingMaxChars: 2000,
+	/**
+	 * Chosen from the measured distribution rather than by feel. Thinking blocks are
+	 * extremely heavy-tailed: median 116 chars, p90 932, max 332,753 — and the top
+	 * 3% of blocks hold 74% of all thinking text. The cap curve is therefore flat:
+	 * 300 removes 84.5%, 1000 removes 73.0%, 2000 removes 68.1%, 4000 removes 65.0%.
+	 * 4000 sits at the flat end, so it costs ~1-2% of the digest over 2000 while
+	 * keeping noticeably more of the reasoning; the aggressive setting is 300.
+	 */
+	thinkingMaxChars: 4000,
 	thoughtMaxChars: 0,
 	humanMaxChars: 20_000,
 	excerptHead: 300,
