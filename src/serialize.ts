@@ -369,11 +369,27 @@ export function serializeConversation(
 	return blocks.join("\n\n");
 }
 
+/**
+ * The pinned original request.
+ *
+ * Labelled as provenance rather than emitted as a bare `user:` line. The content
+ * is verbatim and capped like any other human text — only the framing differs, so
+ * the model reads where the session started instead of a standing instruction it
+ * must keep obeying. That matters when the goal has since changed: a bare line at
+ * the head of the summary competes with the recent work, and can win.
+ */
+export function renderOriginalRequest(task: string, cfg: CliffConfig): string {
+	const t = truncate(task.trim(), cfg.humanMaxChars);
+	return t.length > 0 ? `[original request]\nuser: ${t}` : "";
+}
+
 /** The full summary string Pi will persist as the compaction entry. */
 export function renderSummary(
 	messages: readonly AnyMsg[],
 	cfg: CliffConfig,
 	fileOps?: FileOps,
+	/** Inserted between the header and the body: the carried original request. */
+	head?: string,
 ): { summary: string; stats: SerializationStats } {
 	const stats = newStats();
 	const body = serializeConversation(messages, cfg, stats);
@@ -381,6 +397,6 @@ export function renderSummary(
 	// extension-provided compaction (fromHook: true) does not inherit Pi's
 	// cumulative file lists, so dropping them would lose the model's file map.
 	const files = renderFileTags(fileOps);
-	const summary = [SUMMARY_HEADER, body, files].filter((s) => s.length > 0).join("\n\n");
+	const summary = [SUMMARY_HEADER, head ?? "", body, files].filter((s) => s.length > 0).join("\n\n");
 	return { summary, stats };
 }

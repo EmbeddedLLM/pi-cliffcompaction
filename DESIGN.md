@@ -392,3 +392,94 @@ message's joined text, so a message with several individually-small blocks was
 truncated without being counted (17 reported against a much larger real number).
 Fixed, with a regression test, and `thinkingCharsRemoved` added so the removed
 volume is visible rather than implied.
+
+## 13. The pinned original request
+
+The paper keeps two things positionally outside the compacted region:
+
+```
+19:  s, x ← messages[0], messages[1]
+20:  C, recent ← CliffCompaction(messages[2:])
+21:  return LLM([s, x, C] ‖ recent)
+```
+
+`s` (system prompt) and `x` (first user message) are never handed to the
+compaction function, so no compaction can touch them. Pi preserves the first of
+those and not the second:
+
+- **System prompt — preserved forever.** Pi writes a fresh `systemMessage`
+  checkpoint into every compaction entry.
+- **First user message — preserved for exactly one compaction.** `prepareCompaction`
+  sets `boundaryStart = prevCompactionIndex + 1`, so the next region begins after
+  the previous compaction entry, and the task sits before it. Verified against Pi's
+  own `buildSessionContext` on a real session after one compaction:
+
+  ```
+  [0] compactionSummary (608,519 chars)   <- the task text exists only inside this
+  [2] system
+  entries after the compaction entry: 4   task present: false
+  ```
+
+### What the window and the digest already cover
+
+Three scopes, and only the third needs a mechanism:
+
+| scope | what is kept | lifetime |
+|---|---|---|
+| kept window (`keepRecentTokens`) | messages verbatim | ~one window of work |
+| compacted region (one generation) | all user messages in it, as capped `user:` lines | one compaction cycle |
+| **the pin** | the first user message only | forever, every compaction |
+
+So a user directive already lives for roughly one full budget — verbatim in the
+window, then emitted once in the next digest. That is why carrying *all* user
+turns was rejected: it would duplicate the recency half and add unbounded state.
+The pin is the complement of window+digest, not a duplicate of it: the window
+handles recency, the digest one generation, and the origin is the one thing
+neither can ever reach, because the stack only moves forward.
+
+### Implementation
+
+The task is stored in `details.task` and re-emitted into each new digest. It does
+not accumulate: every compaction rebuilds the digest as `[pin] + [this region]`
+and discards the previous summary rather than merging it, so there is one copy per
+digest, forever.
+
+Three cases, and the distinction between the last two is the important one:
+
+| state | behaviour |
+|---|---|
+| a carried task exists | re-emit it, unchanged — never re-captured, so it cannot drift |
+| no previous compaction (**the origin**) | capture the region's first user message; it is already in the body, so no head pin (that would duplicate) |
+| previous compaction, no carried task (**broken chain**) | **no pin** — yield nothing rather than promote whichever user message leads this region |
+
+The broken-chain case matters because an earlier version captured from the region
+whenever nothing was carried, which silently relabelled a mid-session message as
+the task — worse than no pin, because a wrong goal is more damaging than an absent
+one. A chain break happens when the session moves to Pi's native compaction and
+back, since Pi's own `details` is `{readFiles, modifiedFiles}` with no `task`.
+
+### Two deliberate choices
+
+**Capped by `humanMaxChars`, not a dedicated knob.** The pin is re-emitted in every
+digest, so its cap is a recurring cost. In the measured 546k-token session the
+first message was one sentence plus a large pasted log, so a tighter cap would
+spend less. Reusing `humanMaxChars` was chosen so no part of a goal is ever
+silently dropped; the measurement is in §12 if that trade needs revisiting.
+
+**Labelled as provenance.** Emitted as `[original request]` above a normal
+`user:` line rather than as a bare user message. The content is verbatim and capped
+identically — only the framing differs. This is a small deviation from Algorithm 1,
+which supplies `x` as an ordinary message. The reason is the one failure the pin
+can cause: if the goal changes and the new directive ages out of both the window
+and a digest generation, a bare line at the head reads as the standing goal and can
+outweigh hundreds of steps of work that contradict it. Labelling it costs nothing
+and makes it provenance instead of an instruction.
+
+### Residual risk, stated plainly
+
+Anchoring is reduced, not eliminated. The pin is still salient text at the head of
+the summary. It is worth noting that the paper has the same exposure and no
+mitigation: Algorithm 1 drops every user message except `messages[1]`, so a
+mid-session change of goal loses the revision while the superseded goal stays
+pinned. It never bites in their KernelBench setup, where the goal is stable for
+400 steps.

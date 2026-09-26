@@ -63,13 +63,19 @@ interface State {
 
 let state: State | null = null;
 
-/** `details` of the most recent compaction on the path, for file-list carry. */
-function lastCompactionDetails(entries: readonly SessionEntryLike[]): unknown {
+/**
+ * The most recent compaction on this branch, if there is one.
+ *
+ * Its presence matters as much as its `details`: "no previous compaction" means
+ * this is the origin and the task should be captured, while "a previous compaction
+ * carrying no task" means the chain broke and no pin can be trusted.
+ */
+function previousCompaction(entries: readonly SessionEntryLike[]): { details?: unknown } | undefined {
 	for (let i = entries.length - 1; i >= 0; i--) {
 		const e = entries[i];
-		if (e?.type === "compaction") return e.details;
+		if (e?.type === "compaction") return { details: e.details };
 	}
-	return null;
+	return undefined;
 }
 
 // --- status -----------------------------------------------------------------
@@ -295,7 +301,7 @@ export default function cliffcompaction(pi: ExtensionAPI): void {
 			const plan = planCompaction({
 				prep,
 				cfg: s.cfg,
-				prevDetails: lastCompactionDetails(entries),
+				previous: previousCompaction(entries),
 			});
 
 			s.compactions++;

@@ -29,8 +29,8 @@
  */
 
 import type { CliffConfig } from "./config.ts";
-import { type SerializationStats, messageChars, renderSummary } from "./serialize.ts";
-import type { AnyMsg } from "./types.ts";
+import { type SerializationStats, messageChars, renderOriginalRequest, renderSummary } from "./serialize.ts";
+import { type AnyMsg, type Content, textOf } from "./types.ts";
 
 /** Structural mirror of Pi's `CompactionPreparation` (not a public export). */
 export interface Preparation {
@@ -61,6 +61,23 @@ export interface CliffDetails {
 	/** Pi's own field names, at the top level, so lists survive either direction. */
 	readonly readFiles: string[];
 	readonly modifiedFiles: string[];
+	/**
+	 * The task description, carried verbatim across compactions.
+	 *
+	 * The paper keeps `messages[1]` positionally outside `CliffCompaction`, so the
+	 * task is never summarised and never lost. Pi cannot do that:
+	 * `prepareCompaction` sets `boundaryStart = prevCompactionIndex + 1`, so the
+	 * next region begins *after* the previous compaction entry, and the task sits
+	 * before it. Verified against Pi's own projection: after one compaction the
+	 * task text exists only inside the summary, and the next region does not
+	 * contain it at all. Without this field the task survives exactly one
+	 * compaction, which for a long run means losing the goal.
+	 *
+	 * Carrying it is not "compacting a compaction": it is original content,
+	 * re-emitted verbatim and bounded by `humanMaxChars`, exactly as the paper's
+	 * `x` is re-supplied on every request.
+	 */
+	readonly task?: string;
 	readonly cliffcompaction: {
 		readonly version: number;
 		/** Pi's own flag, recorded for observability: the task's early part was
@@ -113,6 +130,23 @@ export function readFileLists(details: unknown): ResolvedFileLists {
 	return { readFiles: stringsFrom(d.readFiles), modifiedFiles: stringsFrom(d.modifiedFiles) };
 }
 
+/** The task carried by a previous compaction, if any. */
+export function readCarriedTask(details: unknown): string | undefined {
+	if (!details || typeof details !== "object") return undefined;
+	const t = (details as { task?: unknown }).task;
+	return typeof t === "string" && t.trim().length > 0 ? t : undefined;
+}
+
+/** Text of the first user message in a region: the task, when nothing is carried. */
+export function firstUserText(messages: readonly AnyMsg[]): string | undefined {
+	for (const m of messages) {
+		if (m.role !== "user") continue;
+		const t = textOf((m as { content?: Content }).content).trim();
+		if (t.length > 0) return t;
+	}
+	return undefined;
+}
+
 /**
  * Merge every list, then apply Pi's own convention: a file that was modified is
  * not also reported as read, and both lists are sorted. Matching Pi exactly
@@ -139,8 +173,15 @@ export function finalizeFileLists(...lists: readonly (FileLists | undefined | nu
 export interface PlanInput {
 	readonly prep: Preparation;
 	readonly cfg: CliffConfig;
-	/** `details` from the previous compaction on this path, if any. */
-	readonly prevDetails?: unknown;
+	/**
+	 * The previous compaction on this branch, if there is one.
+	 *
+	 * Its presence is what distinguishes "this is the origin, so capture the task"
+	 * from "a compaction happened but carried no task" — a broken carry chain. The
+	 * two are different decisions and conflating them once promoted a mid-session
+	 * user message to being the task.
+	 */
+	readonly previous?: { readonly details?: unknown };
 	/** Pi's `estimateTokens` in production; a chars/4 proxy in tests. Unused for
 	 *  correctness — kept so callers can pass the host's estimator when needed. */
 	readonly estimate?: (m: AnyMsg) => number;
@@ -166,10 +207,39 @@ export function planCompaction(input: PlanInput): PlannedCompaction {
 
 	// History first, then the early part of the current task, in order. Pi's cut
 	// is used unchanged: it is already the boundary cliff wants.
-	const messages: AnyMsg[] = [...prep.messagesToSummarize, ...prep.turnPrefixMessages];
+	const region: AnyMsg[] = [...prep.messagesToSummarize, ...prep.turnPrefixMessages];
 
-	const files = finalizeFileLists(readFileLists(input.prevDetails), fileOpsToLists(prep.fileOps));
-	const { summary, stats } = renderSummary(messages, cfg, files);
+	// Keep the task alive across compactions.
+	//
+	// The paper holds `messages[1]` positionally outside `CliffCompaction`, so the
+	// task is never summarised and never lost. Pi cannot: `prepareCompaction` sets
+	// `boundaryStart = prevCompactionIndex + 1`, so the next region begins after
+	// the previous compaction entry, and the task sits before it. Verified against
+	// Pi's own projection — after one compaction the task text exists only inside
+	// the summary, and the next region does not contain it. Without a carry the
+	// task survives exactly one compaction.
+	//
+	// Carrying it is not "compacting a compaction": it is original content,
+	// re-emitted verbatim and capped like any other human text.
+	const carried = readCarriedTask(input.previous?.details);
+	let task: string | undefined;
+	let head: string | undefined;
+	if (carried !== undefined) {
+		// Carry it onward, exactly as it was: never re-captured, so it cannot drift.
+		task = carried;
+		head = renderOriginalRequest(carried, cfg);
+	} else if (input.previous === undefined) {
+		// The origin. The task is already in this region and will be emitted as a
+		// `user:` line, so record it without duplicating it at the head.
+		task = firstUserText(region);
+	} else {
+		// A compaction happened but carried nothing: a broken chain. Yield no pin
+		// rather than promoting whichever user message happens to lead this region.
+		task = undefined;
+	}
+
+	const files = finalizeFileLists(readFileLists(input.previous?.details), fileOpsToLists(prep.fileOps));
+	const { summary, stats } = renderSummary(region, cfg, files, head);
 
 	return {
 		summary,
@@ -178,10 +248,11 @@ export function planCompaction(input: PlanInput): PlannedCompaction {
 		details: {
 			readFiles: files.readFiles,
 			modifiedFiles: files.modifiedFiles,
+			...(task !== undefined ? { task } : {}),
 			cliffcompaction: { version: 1, split: prep.isSplitTurn, stats },
 		},
 		stats,
-		summarizedMessages: messages.length,
+		summarizedMessages: region.length,
 	};
 }
 

@@ -110,6 +110,108 @@ test("carried lists merge, dedupe, sort and exclude modified from read", () => {
 
 // --- planCompaction ---------------------------------------------------------
 
+test("the origin: the task is captured, and left in place rather than duplicated", () => {
+	const plan = planCompaction({
+		prep: prep({
+			messagesToSummarize: [user("fix the flaky test in repo X"), assistant("looking"), result("read", "R".repeat(3000))],
+		}),
+		// No previous compaction: this is the origin.
+		cfg: cfg(),
+	});
+	assert.equal(plan.details.task, "fix the flaky test in repo X", "recorded for later compactions");
+	assert.equal((plan.summary.match(/^user: fix the flaky test/gm) ?? []).length, 1, "emitted once, by the region");
+	assert.ok(!plan.summary.includes("[original request]"), "no head pin on the origin: it would duplicate");
+});
+
+test("REGRESSION: the task survives a second compaction, labelled as provenance", () => {
+	// Pi's next region begins after the previous compaction entry, so the task is
+	// not in it. Without the carry the goal is lost on the second compaction.
+	const plan = planCompaction({
+		prep: prep({
+			messagesToSummarize: [user("something else entirely"), assistant("step"), result("read", "R".repeat(3000))],
+		}),
+		previous: { details: { task: "fix the flaky test in repo X", readFiles: [], modifiedFiles: [] } },
+		cfg: cfg(),
+	});
+	assert.ok(plan.summary.includes("[original request]\nuser: fix the flaky test in repo X"));
+	assert.equal(plan.details.task, "fix the flaky test in repo X", "carried onward");
+	assert.ok(
+		plan.summary.indexOf("fix the flaky test") < plan.summary.indexOf("something else entirely"),
+		"the origin precedes the region",
+	);
+});
+
+test("the pin is stable across many compactions: carried, never re-captured", () => {
+	let carried: { details?: unknown } | undefined;
+	let task = "fix the flaky test in repo X";
+	// Compaction 1 captures it from the region.
+	let plan = planCompaction({
+		prep: prep({ messagesToSummarize: [user(task), assistant("step")] }),
+		cfg: cfg(),
+	});
+	task = plan.details.task ?? task;
+	carried = { details: plan.details };
+	// Compactions 2..5 carry the same text, even though the region's own first
+	// user message keeps changing.
+	for (let i = 2; i <= 5; i++) {
+		plan = planCompaction({
+			prep: prep({ messagesToSummarize: [user(`unrelated directive ${i}`), assistant("step")] }),
+			previous: carried,
+			cfg: cfg(),
+		});
+		assert.equal(plan.details.task, "fix the flaky test in repo X", `compaction ${i} keeps the original`);
+		assert.ok(plan.summary.includes("[original request]\nuser: fix the flaky test in repo X"));
+		carried = { details: plan.details };
+	}
+});
+
+test("a broken carry chain yields no pin rather than a wrong one", () => {
+	// A previous compaction exists but carries no task — e.g. the session switched
+	// back from Pi's native compaction. Promoting this region's first user message
+	// would silently relabel a mid-session message as the task.
+	const plan = planCompaction({
+		prep: prep({ messagesToSummarize: [user("a mid-session directive"), assistant("step")] }),
+		previous: { details: { readFiles: ["a.ts"], modifiedFiles: [] } },
+		cfg: cfg(),
+	});
+	assert.equal(plan.details.task, undefined);
+	assert.equal("task" in plan.details, false);
+	assert.ok(!plan.summary.includes("[original request]"));
+	assert.ok(plan.summary.includes("a mid-session directive"), "still in the region, just not promoted");
+});
+
+test("the carried task is capped by humanMaxChars, like any human text", () => {
+	const huge = "T".repeat(50_000);
+	const plan = planCompaction({
+		prep: prep({ messagesToSummarize: [user("different"), assistant("more")] }),
+		previous: { details: { task: huge } },
+		cfg: cfg(),
+	});
+	assert.ok(plan.summary.includes("T".repeat(20_000) + "..."));
+	assert.ok(!plan.summary.includes("T".repeat(20_001)));
+});
+
+test("no task is recorded when the origin region has no user message", () => {
+	const plan = planCompaction({
+		prep: prep({ messagesToSummarize: [assistant("continuing"), result("read", "R".repeat(3000))] }),
+		cfg: cfg(),
+	});
+	assert.equal(plan.details.task, undefined);
+	assert.equal("task" in plan.details, false);
+});
+
+test("a malformed carried task is ignored rather than trusted", () => {
+	for (const bad of [42, {}, [], "", "   ", null]) {
+		const plan = planCompaction({
+			prep: prep({ messagesToSummarize: [user("real task"), assistant("x")] }),
+			previous: { details: { task: bad } },
+			cfg: cfg(),
+		});
+		assert.equal(plan.details.task, undefined, `ignored ${JSON.stringify(bad)}`);
+		assert.ok(!plan.summary.includes("[original request]"));
+	}
+});
+
 test("Pi's cut is used unchanged", () => {
 	const plan = planCompaction({ prep: prep(), cfg: cfg() });
 	assert.equal(plan.firstKeptEntryId, "e2");
@@ -177,7 +279,7 @@ test("the thinking cap reaches the digest", () => {
 test("file lists survive from a previous compaction and gain the current one", () => {
 	const plan = planCompaction({
 		prep: prep({ fileOps: { read: new Set(["new.ts"]), edited: new Set(["edited.ts"]) } }),
-		prevDetails: { readFiles: ["old.ts"], modifiedFiles: [] },
+		previous: { details: { readFiles: ["old.ts"], modifiedFiles: [] } },
 		cfg: cfg(),
 	});
 	assert.deepEqual(plan.details.readFiles, ["new.ts", "old.ts"].sort());
