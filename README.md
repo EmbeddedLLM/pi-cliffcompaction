@@ -76,6 +76,16 @@ npm test        # node --test
 npm run typecheck
 ```
 
+## The one carry
+
+Everything except the first user message is either verbatim in the kept window or
+summarised once, then gone — matching the paper's recall tradeoff. The task
+description is the exception: Pi loses it after a single compaction
+(`prepareCompaction` starts the next region *after* the previous compaction entry),
+so it is pinned in `details.task` and re-emitted into every later digest as
+`[original request]`. Verbatim, capped by `humanMaxChars`, one copy per digest, and
+never re-captured. See DESIGN.md §13.
+
 ## Configuration
 
 Knobs live in `~/.pi/agent/cliffcompaction.json`, with an optional project-level

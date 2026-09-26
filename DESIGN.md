@@ -142,6 +142,7 @@ below touches it.
 | `custom` | kept: extension-injected context |
 | `bashExecution` | `$ command` + excerpt; skipped when `excludeFromContext` |
 | `system` | not folded in — Pi's compaction entry carries the checkpoint |
+| first user message, on later compactions | re-emitted verbatim at the head as `[original request]` (§13) |
 | images | dropped from the compacted region |
 
 The header is deliberately honest: *"The following is a summary of your previous
