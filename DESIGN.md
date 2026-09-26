@@ -524,3 +524,39 @@ provider that still had the identical prefix. The report says which reading it i
 (`note ... served from cache`) and makes no causal claim in either direction.
 Establishing the real amortisation needs one clean long session with no repeated
 content — which is exactly what watching your own runs provides.
+
+### Verification on a real session
+
+Replayed the 546k-token session from §12 through the planner three times, using
+the real `firstKeptEntryId` (`bd33a1aa`) to define the region each time:
+
+```
+compaction 1  region=1160 msgs
+  details.task      : Can you help check what is this timeout error? ...
+  head pin emitted  : false      <- already in the body, so no duplicate
+  task in body      : true
+
+compaction 2  region=5 msgs (entries after firstKeptEntryId)
+  task text present in that region: false
+  head pin emitted  : true       <- the carry, doing its job
+  task carried      : true
+  details.task kept : true
+
+compaction 3  task identical to compaction 1: true
+broken chain  pin emitted: false, task: undefined
+```
+
+The middle block is the whole point: the task is provably absent from the second
+compaction's region, and present anyway. Digest head at that point:
+
+```
+The following is a summary of your previous actions (long observations omitted):
+
+[original request]
+user: Can you help check what is this timeout error? and where does this comes from?
+```
+
+This is an offline replay through the same planner the extension calls, with the
+region derived from the real cut — not a live two-compaction session, which the
+sandbox could not produce (Pi declines to re-compact once only the previous
+summary remains).
