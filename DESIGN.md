@@ -628,6 +628,12 @@ and if a low threshold is wanted, either raise B or shrink the keep window. A
 threshold of 150k with a 40k keep is workable but thrashy; the same threshold with
 a 15–20k keep is comfortable.
 
+Both levers therefore need to be reachable from the menu, which is why "Set keep
+window (tokens) — applies immediately" exists. `keepRecentTokens` is Pi's setting
+just as much as `reserveTokens` is, so changing it in our config without
+re-applying would leave Pi on the old value — the same split-brain the status panel
+exists to catch. "Restore defaults" re-applies for the same reason.
+
 ## 16. Saving only the diff
 
 The menu writes `~/.pi/agent/cliffcompaction.json`, and it used to write the whole

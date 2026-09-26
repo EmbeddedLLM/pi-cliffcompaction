@@ -45,7 +45,9 @@ or add the directory to `extensions` in `~/.pi/agent/settings.json`.
 
 ```
 /cliffcompaction            interactive panel
+/cliffcompaction activate   the one-command setup: apply threshold, leave shadow
 /cliffcompaction status     one-shot report
+/cliffcompaction cache      token/cache economics for the current session
 /cliffcompaction apply      write the threshold into Pi's settings and reload
 ```
 

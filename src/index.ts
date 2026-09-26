@@ -262,6 +262,7 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 			"Status",
 			"Activate — apply threshold and leave shadow",
 			"Set threshold (tokens) — applies immediately",
+			"Set keep window (tokens) — applies immediately",
 			"Set thinking cap (chars)",
 			"Set result cap (chars)",
 			`${s.cfg.shadow ? "Leave" : "Enter"} shadow mode (observe only)`,
@@ -335,6 +336,21 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				ctx.ui.notify(`resultMaxChars = ${n}`, "info");
 				continue;
 			}
+			case "Set keep window (tokens) — applies immediately": {
+				// The kept window is Pi's knob too, and it is the cheapest lever on the
+				// cliff geometry: at a low threshold it is what decides the headroom.
+				const n = parsePositiveInt(await ctx.ui.input("Verbatim window kept after a cliff (tokens)", String(s.cfg.keepRecentTokens)));
+				if (n === null) {
+					ctx.ui.notify("not a number, unchanged", "warning");
+					continue;
+				}
+				s.cfg = { ...s.cfg, keepRecentTokens: n };
+				saveUserConfig(s.paths, s.cfg);
+				const msg = await applyThreshold(ctx);
+				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
+				if (msg.startsWith("applied")) await ctx.reload();
+				return;
+			}
 			case "Leave shadow mode (observe only)":
 			case "Enter shadow mode (observe only)": {
 				s.cfg = { ...s.cfg, shadow: !s.cfg.shadow };
@@ -348,8 +364,12 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				if (!ok) continue;
 				s.cfg = loadConfig(s.paths).cfg;
 				saveUserConfig(s.paths, s.cfg);
-				ctx.ui.notify("defaults restored (Pi's own compaction settings are untouched)", "info");
-				continue;
+				// Re-apply, or Pi's settings would keep the old threshold and the two
+				// would silently disagree until the next status check noticed.
+				const msg = await applyThreshold(ctx);
+				ctx.ui.notify(`defaults restored; ${msg}`, msg.startsWith("applied") ? "info" : "warning");
+				if (msg.startsWith("applied")) await ctx.reload();
+				return;
 			}
 			default:
 				continue;
