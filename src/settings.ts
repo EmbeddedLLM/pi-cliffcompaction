@@ -110,6 +110,31 @@ export function withAppliedThreshold(
 	return { ...settings, compaction };
 }
 
+/**
+ * Remove the threshold we applied, restoring Pi's own resolution.
+ *
+ * Needed because uninstalling does not undo this: the override lives in Pi's
+ * settings.json, which `pi remove` has no reason to touch. Without this, removing
+ * the extension leaves Pi compacting at *our* threshold with *its* LLM summariser
+ * — a silent behaviour change that outlives the uninstall.
+ *
+ * `compaction.enabled` is dropped only when it is the last key and reads `true`,
+ * which is already Pi's default, so removing it cannot change behaviour.
+ */
+export function withoutAppliedThreshold(settings: PiSettings, key: string): PiSettings {
+	const compaction: PiCompactionSettings = { ...(settings.compaction ?? {}) };
+	const overrides: Record<string, CompactionModelOverride> = { ...(compaction.modelOverrides ?? {}) };
+	delete overrides[key];
+	if (Object.keys(overrides).length === 0) delete compaction.modelOverrides;
+	else compaction.modelOverrides = overrides;
+	if (compaction.enabled === true && Object.keys(compaction).length === 1) delete compaction.enabled;
+	if (Object.keys(compaction).length === 0) {
+		const next = { ...settings };
+		delete next.compaction;
+		return next;
+	}
+	return { ...settings, compaction };
+}
 /** Pi's resolution order: model override, then ordinary setting, then built-in. */
 export function resolveReserveTokens(
 	settings: PiSettings,

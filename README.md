@@ -46,6 +46,7 @@ or add the directory to `extensions` in `~/.pi/agent/settings.json`.
 ```
 /cliffcompaction            interactive panel
 /cliffcompaction activate   the one-command setup: apply threshold, leave shadow
+/cliffcompaction deactivate remove the threshold, back to Pi's default
 /cliffcompaction status     one-shot report
 /cliffcompaction cache      token/cache economics for the current session
 /cliffcompaction apply      write the threshold into Pi's settings and reload
@@ -88,6 +89,22 @@ description is the exception: Pi loses it after a single compaction
 so it is pinned in `details.task` and re-emitted into every later digest as
 `[original request]`. Verbatim, capped by `humanMaxChars`, one copy per digest, and
 never re-captured. See DESIGN.md §13.
+
+## Uninstalling
+
+**Run `/cliffcompaction deactivate` first.** The threshold lives in Pi's own
+`settings.json`, which `pi remove` has no reason to touch, so removing the
+extension without this leaves Pi compacting at *your* threshold with *its* LLM
+summariser — a silent behaviour change that outlives the uninstall.
+
+```bash
+/cliffcompaction deactivate     # removes our compaction override
+pi remove <source>              # removes the package entry and any git clone
+```
+
+What is left afterwards, all harmless: `~/.pi/agent/cliffcompaction.json` (our
+knobs, a few lines), and any compaction entries already written into sessions —
+those are Pi's own records and stay readable. See DESIGN.md §17.
 
 ## Configuration
 

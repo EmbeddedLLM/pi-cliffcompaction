@@ -33,6 +33,7 @@ import {
 	resolveKeepRecentTokens,
 	resolveReserveTokens,
 	withAppliedThreshold,
+	withoutAppliedThreshold,
 	writeSettingsAtomic,
 } from "./settings.ts";
 
@@ -241,6 +242,25 @@ function cacheReportText(ctx: ExtensionContext): string {
 	return formatCacheReport(buildCacheReport(samples, compactions));
 }
 
+async function deactivate(ctx: ExtensionCommandContext): Promise<string> {
+	const s = state;
+	if (!s) return "not initialised";
+	const model = ctx.model;
+	const key = model ? modelKey(model.provider, model.id) : null;
+	if (!key) return "cannot determine the active model; nothing removed";
+	const files = configFilePaths(s.paths);
+	const r = readSettings(files.userSettings);
+	if (!r.ok) return `refusing to write: ${r.reason}`;
+	const next = withoutAppliedThreshold(r.settings, key);
+	if (JSON.stringify(next) === JSON.stringify(r.settings)) return `nothing to remove for ${key}`;
+	try {
+		writeSettingsAtomic(files.userSettings, next);
+	} catch (err) {
+		return `write failed: ${String(err)}`;
+	}
+	return `removed the threshold for ${key} — Pi now compacts at its own default`;
+}
+
 // --- command ----------------------------------------------------------------
 
 function parsePositiveInt(v: string | undefined): number | null {
@@ -261,6 +281,7 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 		const choice = await ctx.ui.select(`CliffCompaction — ${mode}`, [
 			"Status",
 			"Activate — apply threshold and leave shadow",
+			"Deactivate — remove threshold, back to Pi's default",
 			"Set threshold (tokens) — applies immediately",
 			"Set keep window (tokens) — applies immediately",
 			"Set thinking cap (chars)",
@@ -297,6 +318,17 @@ async function menu(ctx: ExtensionCommandContext): Promise<void> {
 				// can make the threshold take effect. State must not be reused after:
 				// reload replaces the extension runtime.
 				if (msg.startsWith("applied")) await ctx.reload();
+				return;
+			}
+			case "Deactivate — remove threshold, back to Pi's default": {
+				const ok = await ctx.ui.confirm(
+					"Deactivate",
+					"Remove our override from Pi's settings? Pi returns to its own compaction threshold, and any prior digest stays in the session either way.",
+				);
+				if (!ok) continue;
+				const msg = await deactivate(ctx);
+				ctx.ui.notify(msg, msg.startsWith("removed") || msg.startsWith("nothing") ? "info" : "warning");
+				if (msg.startsWith("removed")) await ctx.reload();
 				return;
 			}
 			case "Set threshold (tokens) — applies immediately": {
@@ -468,6 +500,12 @@ export default function cliffcompaction(pi: ExtensionAPI): void {
 				const msg = verb === "activate" ? await activate(ctx) : await applyThreshold(ctx);
 				ctx.ui.notify(msg, msg.startsWith("applied") ? "info" : "warning");
 				if (msg.startsWith("applied")) await ctx.reload();
+				return;
+			}
+			if (verb === "deactivate") {
+				const msg = await deactivate(ctx);
+				ctx.ui.notify(msg, "info");
+				if (msg.startsWith("removed")) await ctx.reload();
 				return;
 			}
 			await menu(ctx);

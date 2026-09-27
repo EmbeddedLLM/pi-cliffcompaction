@@ -18,6 +18,7 @@ import {
 	resolveReserveTokens,
 	serializeSettings,
 	withAppliedThreshold,
+	withoutAppliedThreshold,
 	writeSettingsAtomic,
 } from "./settings.ts";
 
@@ -148,4 +149,44 @@ test("the write creates the parent directory", () => {
 
 test("serializeSettings produces newline-free, 2-space JSON", () => {
 	assert.equal(serializeSettings({ a: [1, 2] }), '{\n  "a": [\n    1,\n    2\n  ]\n}');
+});
+
+// --- deactivation -----------------------------------------------------------
+
+test("deactivating removes the override and leaves nothing of ours behind", () => {
+	const applied = withAppliedThreshold({ theme: "dark" }, "prov/model", 1_000_000, cfg());
+	const back = withoutAppliedThreshold(applied, "prov/model");
+	// Uninstalling does not undo the threshold, so this is the only clean revert.
+	assert.equal(back.compaction, undefined, "no compaction block left behind");
+	assert.deepEqual(back, { theme: "dark" });
+});
+
+test("deactivating leaves other models and Pi's own settings alone", () => {
+	const before = {
+		compaction: {
+			reserveTokens: 111,
+			modelOverrides: { "a/b": { reserveTokens: 7 }, "c/d": { reserveTokens: 9 } },
+		},
+	};
+	const after = withoutAppliedThreshold(before, "a/b");
+	assert.equal(after.compaction?.reserveTokens, 111, "the ordinary setting is untouched");
+	assert.equal(after.compaction?.modelOverrides?.["a/b"], undefined);
+	assert.equal(after.compaction?.modelOverrides?.["c/d"]?.reserveTokens, 9);
+});
+
+test("deactivating drops an enabled:true we added, since that is the default", () => {
+	const applied = withAppliedThreshold({}, "a/b", 1000, cfg());
+	assert.equal(applied.compaction?.enabled, true, "we set it");
+	assert.deepEqual(withoutAppliedThreshold(applied, "a/b"), {}, "and clear it again");
+});
+
+test("deactivating preserves an explicit enabled:false", () => {
+	const s = { compaction: { enabled: false, modelOverrides: { "a/b": { reserveTokens: 1 } } } };
+	const after = withoutAppliedThreshold(s, "a/b");
+	assert.equal(after.compaction?.enabled, false, "the user's choice is not ours to remove");
+});
+
+test("deactivating something never applied is a no-op", () => {
+	const s = { theme: "dark", compaction: { reserveTokens: 111 } };
+	assert.deepEqual(withoutAppliedThreshold(s, "nothing/here"), s);
 });

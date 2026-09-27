@@ -656,3 +656,51 @@ improving a default reaches everyone who did not explicitly set it.
 There is no migration for a file written the old way — the explicit values are
 still honoured, which is correct — but "Restore defaults" now writes `{}` and
 clears the freeze.
+
+## 17. What survives uninstalling
+
+Measured, not assumed: install → activate → `pi remove` in a sandbox, then inspect.
+
+| artifact | removed by `pi remove`? | affects behaviour? |
+|---|---|---|
+| `packages` entry in `settings.json` | **yes** | — |
+| git clone under `~/.pi/agent/git/` | **yes** | disk only |
+| `settings.json` → `compaction.modelOverrides[<model>]` | **no** | **yes** |
+| `settings.json` → `compaction.enabled` | **no** | no — `true` is already Pi's default |
+| `~/.pi/agent/cliffcompaction.json` | **no** | no — nothing reads it |
+| compaction entries in session JSONL | **no** | yes, by design: that is history |
+| `context_edit` / custom entries | we never write any | — |
+
+The one that matters is the threshold. `pi remove` has no reason to touch Pi's own
+compaction settings, so uninstalling the extension left Pi firing at our threshold
+(150k in the case tested) while using Pi's native LLM summariser, instead of stock
+Pi's `window - 16384`. Silent and persistent — exactly the class of leftover worth
+worrying about.
+
+Fixed with `/cliffcompaction deactivate`, which deletes the override. It drops
+`enabled` only when that is the last key and reads `true`, which is already the
+default, so it cannot change behaviour; an explicit `enabled: false` is preserved
+because it is the user's choice and not ours to remove. Verified end to end:
+activate → deactivate → `pi remove` leaves `settings.json` with no `compaction`
+key at all.
+
+### The second-order effect: our digest becomes Pi's `previousSummary`
+
+`prepareCompaction()` sets `previousSummary = projectedEntries[prevCompactionIndex]
+.sourceEntry.summary` **unconditionally** — it does not check `fromHook`. So after
+deactivating, the next *native* compaction feeds our digest into Pi's LLM
+summarisation prompt as prior context. That is fine mechanically — Pi's prompt is
+built to merge a prior summary — but the measured digest was 608,518 chars
+(~152k tokens), which is a lot of input, and the resulting summary inherits our
+`[... N chars truncated ...]` markers and the `[original request]` head.
+
+Nothing is corrupted, and session history stays valid because Pi reads a
+`CompactionEntry` through `firstKeptEntryId` and `summary` alone. Worth knowing
+before deactivating a session with a large mechanical digest in it.
+
+### File-tracking resets
+
+`extractFileOperations()` inherits a previous compaction's `readFiles` /
+`modifiedFiles` only when `!fromHook`. Ours is always `fromHook: true`, so after
+deactivating, Pi's own file accumulation restarts from that point rather than
+continuing. Minor, and the reason §13 carries the lists itself.
